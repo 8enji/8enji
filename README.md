@@ -11,7 +11,6 @@
   - 💵 Finance
 - 📫 Contact me at **bcharest3@gatech.edu**
 - 💻 Visit my website at www.bencharest.com
-<br>
 
 <h3 align="left">Languages and Tools:</h3> 
 <div align="left">
