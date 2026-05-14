@@ -234,6 +234,73 @@ def render_languages_panel(languages: list[tuple[str, float]], x: int, y: int, w
     return "".join(out)
 
 
+def render_activity_panel(
+    activity: list[int],
+    peak: int,
+    streak_days: int,
+    avg: float,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+) -> str:
+    frame = render_panel_frame(x, y, w, h, "activity", f"peak {peak}/day · streak {streak_days}d")
+
+    body_x = x + 22
+    body_w = w - 44
+    sub_y = y + 60
+    chart_top = y + 80
+    chart_bottom = y + h - 48
+    chart_h = chart_bottom - chart_top
+    axis_y = chart_bottom + 18
+
+    # Sub-row: "commits/day · last 60 days" green | "avg 14.3" muted
+    sub = (
+        f'<text x="{body_x}" y="{sub_y}" fill="{COLORS["green"]}" font-size="13" '
+        f'font-family=\'{FONT_STACK}\'>commits/day · last 60 days</text>'
+        f'<text x="{x + w - 22}" y="{sub_y}" text-anchor="end" fill="{COLORS["muted"]}" '
+        f'font-size="11.5" font-family=\'{FONT_STACK}\' letter-spacing="1.1">avg {avg:.1f}</text>'
+    )
+
+    # Bars
+    n = max(len(activity), 1)
+    gap = 4
+    bar_w = (body_w - gap * (n - 1)) / n
+    max_v = max(activity) if activity else 1
+    bars = []
+    for i, v in enumerate(activity):
+        pct = max(0.10, v / max_v)  # min 10% so empty days still register
+        bh = chart_h * pct
+        bx = body_x + i * (bar_w + gap)
+        by = chart_bottom - bh
+        bars.append(
+            f'<rect class="bar-bar" x="{bx:.2f}" y="{by:.2f}" width="{bar_w:.2f}" '
+            f'height="{bh:.2f}" rx="2" ry="2" fill="{COLORS["green"]}"/>'
+        )
+
+    # Axis line + labels
+    labels_y = axis_y + 10
+    axis_line = (
+        f'<line x1="{body_x}" y1="{axis_y}" x2="{x + w - 22}" y2="{axis_y}" '
+        f'stroke="rgba(148,163,184,0.08)" stroke-width="1" stroke-dasharray="3 3"/>'
+    )
+    label_positions = [
+        (body_x, "60d", "start"),
+        (body_x + body_w * 0.25, "45d", "middle"),
+        (body_x + body_w * 0.50, "30d", "middle"),
+        (body_x + body_w * 0.75, "15d", "middle"),
+        (body_x + body_w, "today", "end"),
+    ]
+    labels = "".join(
+        f'<text x="{lx:.2f}" y="{labels_y}" text-anchor="{anchor}" fill="{COLORS["muted_soft"]}" '
+        f'font-size="11" font-family=\'{FONT_STACK}\' letter-spacing="0.88" '
+        f'text-transform="uppercase">{txt}</text>'
+        for lx, txt, anchor in label_positions
+    )
+
+    return frame + sub + "".join(bars) + axis_line + labels
+
+
 def render_defs() -> str:
     """SVG <defs> block: shared patterns/masks. Referenced by panels."""
     return """<defs>
