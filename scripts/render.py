@@ -4,6 +4,8 @@ Pure functions: no I/O, no global state. Coordinates and colors derive
 from the design at readme/project/readme.html in the design handoff.
 """
 
+from datetime import date
+
 CANVAS_W = 1500
 CANVAS_PADDING = 14
 
@@ -83,3 +85,82 @@ def render_panel_frame(x: int, y: int, w: int, h: int, label: str, right: str = 
         font-size="11.5" font-family='{FONT_STACK}' font-weight="500"
         letter-spacing="1.4" text-transform="uppercase">{right}</text>
 </g>"""
+
+
+def _format_uptime(uptime_from: str, today: date) -> str:
+    """Convert ISO date string to `Ny Md` since that date."""
+    start = date.fromisoformat(uptime_from)
+    delta_days = (today - start).days
+    years = delta_days // 365
+    days = delta_days % 365
+    return f"{years}y {days}d"
+
+
+def _escape_xml(s: str) -> str:
+    """Minimal XML escape for text content."""
+    return (
+        s.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def render_me_panel(cfg: dict, x: int, y: int, w: int, h: int, today: date) -> str:
+    frame = render_panel_frame(x, y, w, h, "me", "/etc/8enji.png")
+
+    # ASCII portrait — fixed-width font, 8px, line-height 1.05
+    ascii_lines = cfg["ascii_art"].rstrip("\n").split("\n")
+    ascii_x = x + 22
+    ascii_y = y + 56
+    line_height = 8 * 1.05
+    ascii_tspans = "".join(
+        f'<tspan x="{ascii_x}" dy="{0 if i == 0 else line_height}">{_escape_xml(line)}</tspan>'
+        for i, line in enumerate(ascii_lines)
+    )
+    ascii_block = (
+        f'<text font-family=\'{FONT_STACK}\' font-size="8" fill="{COLORS["text_dim"]}" '
+        f'xml:space="preserve" font-weight="500" y="{ascii_y}">{ascii_tspans}</text>'
+    )
+
+    # Sysinfo table — purple keys, light values
+    me = cfg["me"]
+    sys_rows = [
+        ("host", f'{cfg["handle"]}<tspan fill="{COLORS["muted"]}">@</tspan>{cfg["machine"]}'),
+        ("os", me["os"]),
+        ("shell", me["shell"]),
+        ("editor", me["editor"]),
+        ("wm", me["wm"]),
+        ("theme", me["theme"]),
+        ("uptime", _format_uptime(me["uptime_from"], today)),
+    ]
+    sys_x_key = x + 380
+    sys_x_val = sys_x_key + 90
+    sys_y_start = y + h // 2 - (len(sys_rows) * 22) // 2 + 8
+    sys_lines = []
+    for i, (k, v) in enumerate(sys_rows):
+        row_y = sys_y_start + i * 22
+        sys_lines.append(
+            f'<text x="{sys_x_key}" y="{row_y}" fill="{COLORS["purple"]}" font-size="13" font-family=\'{FONT_STACK}\'>{k}</text>'
+        )
+        # value may contain inline <tspan> for the host row
+        sys_lines.append(
+            f'<text x="{sys_x_val}" y="{row_y}" fill="{COLORS["text"]}" font-size="13" font-family=\'{FONT_STACK}\'>{v}</text>'
+        )
+    sysinfo = "\n".join(sys_lines)
+
+    # Footer — handle · website ……… online
+    footer_y = y + h - 22
+    footer_top = footer_y - 14
+    footer = (
+        f'<line x1="{x + 22}" y1="{footer_top}" x2="{x + w - 22}" y2="{footer_top}" '
+        f'stroke="rgba(148,163,184,0.08)" stroke-width="1" stroke-dasharray="3 3"/>'
+        f'<text x="{x + 22}" y="{footer_y}" fill="{COLORS["muted"]}" font-size="11.5" '
+        f'font-family=\'{FONT_STACK}\' letter-spacing="1.8" text-transform="uppercase">'
+        f'{cfg["handle"]} <tspan fill="{COLORS["muted_soft"]}">·</tspan> {cfg["website"]}</text>'
+        f'<text x="{x + w - 22}" y="{footer_y}" text-anchor="end" fill="{COLORS["green"]}" '
+        f'font-size="11.5" font-family=\'{FONT_STACK}\' letter-spacing="1.8" text-transform="uppercase">'
+        f'// online</text>'
+    )
+
+    return frame + ascii_block + sysinfo + footer
