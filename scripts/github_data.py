@@ -1,6 +1,7 @@
 """GitHub API fetchers for the dashboard generator."""
 
 import requests
+from datetime import date, timedelta
 
 
 GITHUB_API = "https://api.github.com"
@@ -52,6 +53,49 @@ class GitHubClient:
         r.raise_for_status()
         return r.json()
 
+    def fetch_contributions(self, today: date) -> dict:
+        from datetime import datetime, time, timedelta, timezone
+
+        end = datetime.combine(today, time(23, 59, 59), tzinfo=timezone.utc)
+        start = end - timedelta(days=365)
+        query = """
+        query($login: String!, $from: DateTime!, $to: DateTime!) {
+          user(login: $login) {
+            contributionsCollection(from: $from, to: $to) {
+              totalCommitContributions
+              contributionCalendar {
+                weeks {
+                  contributionDays {
+                    date
+                    contributionCount
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        r = self.session.post(
+            GITHUB_GRAPHQL,
+            json={
+                "query": query,
+                "variables": {
+                    "login": self.user,
+                    "from": start.isoformat(),
+                    "to": end.isoformat(),
+                },
+            },
+            timeout=20,
+        )
+        r.raise_for_status()
+        payload = r.json()
+        cc = payload["data"]["user"]["contributionsCollection"]
+        days: dict[str, int] = {}
+        for week in cc["contributionCalendar"]["weeks"]:
+            for d in week["contributionDays"]:
+                days[d["date"]] = d["contributionCount"]
+        return {"total_commits": cc["totalCommitContributions"], "days": days}
+
 
 def aggregate_languages(
     repo_langs: dict[str, dict[str, int]],
@@ -69,4 +113,13 @@ def aggregate_languages(
     out = [(name.lower(), n * 100 / grand) for name, n in top]
     if rest_bytes:
         out.append(("other", rest_bytes * 100 / grand))
+    return out
+
+
+def extract_activity(days: dict[str, int], today: date, window: int = 60) -> list[int]:
+    """Return `window` daily counts ending at `today` (oldest first, today last)."""
+    out: list[int] = []
+    for i in range(window - 1, -1, -1):
+        d = today - timedelta(days=i)
+        out.append(days.get(d.isoformat(), 0))
     return out
