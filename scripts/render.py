@@ -301,6 +301,87 @@ def render_activity_panel(
     return frame + sub + "".join(bars) + axis_line + labels
 
 
+def format_compact(n: int) -> str:
+    return f"{n:,}"
+
+
+def format_loc(total_bytes: int) -> str:
+    lines = total_bytes // 50
+    return f"{lines // 1000}k"
+
+
+def render_stats_panel(stats: dict, x: int, y: int, w: int, h: int) -> str:
+    frame = render_panel_frame(x, y, w, h, "stats", "● LIVE")
+
+    body_x = x + 22
+    body_w = w - 44
+    row_y = y + 60
+    row_h = 26
+
+    rows = [
+        ("repos", str(stats["repos"]), False),
+        ("stars", str(stats["stars"]), True),
+        ("followers", str(stats["followers"]), False),
+        ("commits", format_compact(stats["commits"]), False),
+        ("loc", format_loc(stats["loc_bytes"]), False),
+    ]
+
+    out = [frame]
+    for i, (k, v, has_star) in enumerate(rows):
+        ry = row_y + i * row_h
+        v_text = v + (f'<tspan fill="{COLORS["orange"]}" dx="6">★</tspan>' if has_star else "")
+        out.append(
+            f'<text x="{body_x}" y="{ry}" fill="{COLORS["text"]}" font-size="13" '
+            f'font-family=\'{FONT_STACK}\'>{k}</text>'
+        )
+        out.append(
+            f'<text x="{body_x + body_w}" y="{ry}" text-anchor="end" fill="{COLORS["text"]}" '
+            f'font-size="13" font-family=\'{FONT_STACK}\' font-variant-numeric="tabular-nums">'
+            f'{v_text}</text>'
+        )
+        if i < len(rows) - 1:
+            out.append(
+                f'<line x1="{body_x}" y1="{ry + 8}" x2="{body_x + body_w}" y2="{ry + 8}" '
+                f'stroke="rgba(148,163,184,0.06)" stroke-width="1" stroke-dasharray="1 4"/>'
+            )
+
+    # Top repos header
+    top_head_y = row_y + len(rows) * row_h + 18
+    out.append(
+        f'<line x1="{body_x}" y1="{top_head_y - 14}" x2="{body_x + body_w}" y2="{top_head_y - 14}" '
+        f'stroke="rgba(148,163,184,0.10)" stroke-width="1" stroke-dasharray="3 3"/>'
+    )
+    out.append(
+        f'<text x="{body_x}" y="{top_head_y}" fill="{COLORS["muted"]}" font-size="11.5" '
+        f'font-family=\'{FONT_STACK}\' letter-spacing="1.6" text-transform="uppercase">top repos</text>'
+    )
+    out.append(
+        f'<text x="{body_x + body_w}" y="{top_head_y}" text-anchor="end" fill="{COLORS["muted_soft"]}" '
+        f'font-size="11.5" font-family=\'{FONT_STACK}\' font-weight="500" letter-spacing="1.4" '
+        f'text-transform="uppercase">by ★</text>'
+    )
+
+    # Top repo rows
+    for i, repo in enumerate(stats["top_repos"][:3]):
+        ry = top_head_y + 22 + i * 22
+        out.append(
+            f'<text x="{body_x}" y="{ry}" fill="{COLORS["text"]}" font-size="13" '
+            f'font-family=\'{FONT_STACK}\'>{_escape_xml(repo["name"])}</text>'
+        )
+        out.append(
+            f'<text x="{body_x + body_w - 80}" y="{ry}" text-anchor="end" '
+            f'fill="{COLORS["text_dim"]}" font-size="12" font-family=\'{FONT_STACK}\'>'
+            f'{_escape_xml(repo["language"])}</text>'
+        )
+        out.append(
+            f'<text x="{body_x + body_w}" y="{ry}" text-anchor="end" fill="{COLORS["orange"]}" '
+            f'font-size="13" font-family=\'{FONT_STACK}\' font-variant-numeric="tabular-nums">'
+            f'★ {repo["stars"]}</text>'
+        )
+
+    return "".join(out)
+
+
 def render_defs() -> str:
     """SVG <defs> block: shared patterns/masks. Referenced by panels."""
     return """<defs>
