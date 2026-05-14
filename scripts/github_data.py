@@ -53,6 +53,17 @@ class GitHubClient:
         r.raise_for_status()
         return r.json()
 
+    def fetch_total_commits(self) -> int:
+        """All-time public commit count for the user, via the search API."""
+        r = self.session.get(
+            f"{GITHUB_API}/search/commits",
+            params={"q": f"author:{self.user}", "per_page": 1},
+            headers={"Accept": "application/vnd.github.cloak-preview+json"},
+            timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()["total_count"]
+
     def fetch_contributions(self, today: date) -> dict:
         from datetime import datetime, time, timedelta, timezone
 
@@ -107,10 +118,14 @@ class GitHubClient:
 
         languages = aggregate_languages(repo_langs)
         total_loc_bytes = sum(
-            n for langs in repo_langs.values() for n in langs.values()
+            n
+            for langs in repo_langs.values()
+            for name, n in langs.items()
+            if name not in EXCLUDED_LANGUAGES
         )
 
         contrib = self.fetch_contributions(today=today)
+        total_commits = self.fetch_total_commits()
         activity = extract_activity(contrib["days"], today=today, window=60)
         activity_avg = sum(activity) / len(activity) if activity else 0.0
         activity_peak = max(activity) if activity else 0
@@ -135,7 +150,7 @@ class GitHubClient:
             "followers": user["followers"],
             "public_repos": user["public_repos"],
             "total_stars": sum(r.get("stargazers_count", 0) for r in repos),
-            "total_commits": contrib["total_commits"],
+            "total_commits": total_commits,
             "total_loc_bytes": total_loc_bytes,
             "languages": languages,
             "activity": activity,
@@ -146,13 +161,22 @@ class GitHubClient:
         }
 
 
+EXCLUDED_LANGUAGES = {"Jupyter Notebook"}
+
+
 def aggregate_languages(
     repo_langs: dict[str, dict[str, int]],
 ) -> list[tuple[str, float]]:
-    """Combine per-repo language bytes into top-5 lowercased + 'other' percentages."""
+    """Combine per-repo language bytes into top-5 lowercased + 'other' percentages.
+
+    Languages in EXCLUDED_LANGUAGES are skipped — Jupyter Notebook is excluded
+    because its byte count is inflated by base64-encoded cell outputs.
+    """
     totals: dict[str, int] = {}
     for langs in repo_langs.values():
         for name, n in langs.items():
+            if name in EXCLUDED_LANGUAGES:
+                continue
             totals[name] = totals.get(name, 0) + n
 
     grand = sum(totals.values()) or 1

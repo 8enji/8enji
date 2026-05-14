@@ -34,3 +34,14 @@ def test_aggregate_languages_returns_at_most_six_rows():
     repo_langs = {"r": {f"L{i}": 1000 for i in range(20)}}
     result = aggregate_languages(repo_langs)
     assert len(result) <= 6
+
+
+def test_aggregate_languages_excludes_jupyter_notebook():
+    repo_langs = {
+        "ml-project": {"Jupyter Notebook": 9_000_000, "Python": 1000},
+        "other": {"Python": 500},
+    }
+    result = aggregate_languages(repo_langs)
+    names = [n for n, _ in result]
+    assert "jupyter notebook" not in names
+    assert names[0] == "python"

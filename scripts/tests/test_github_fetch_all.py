@@ -49,6 +49,11 @@ def test_fetch_all_composes_dashboard_data():
         }}}},
         status=200,
     )
+    responses.get(
+        "https://api.github.com/search/commits",
+        json={"total_count": 9870, "items": []},
+        status=200,
+    )
 
     client = GitHubClient(token="t", user="8enji")
     data = client.fetch_all(today=date(2026, 5, 14))
@@ -56,7 +61,7 @@ def test_fetch_all_composes_dashboard_data():
     assert data["followers"] == 89
     assert data["public_repos"] == 42
     assert data["total_stars"] == 84 + 51 + 37
-    assert data["total_commits"] == 3128
+    assert data["total_commits"] == 9870
     assert data["total_loc_bytes"] == 140000
     assert len(data["activity"]) == 60
     assert data["activity"][-1] == 12
