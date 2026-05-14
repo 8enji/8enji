@@ -64,3 +64,22 @@ def render_statusbar(cfg: dict, clock: str, y: int) -> str:
   <text x="{right_x - 70}" y="{text_y}" fill="{cs}" font-size="{fs}" font-family='{family}' letter-spacing="1.4">NOR</text>
   <text x="{right_x}" y="{text_y}" text-anchor="end" fill="{cs}" font-size="{fs}" font-family='{family}' letter-spacing="1.4">{clock}</text>
 </g>"""
+
+
+def render_panel_frame(x: int, y: int, w: int, h: int, label: str, right: str = "") -> str:
+    """Render an empty panel: rounded border + heading row.
+
+    Header text uses uppercase tracked letter-spacing per the design.
+    """
+    head_y = y + 28
+    body_x = x + 22
+    return f"""<g class="panel" data-label="{label}">
+  <rect x="{x}" y="{y}" width="{w}" height="{h}" rx="9" ry="9"
+        fill="rgba(255,255,255,0.012)" stroke="{COLORS['panel_border']}" stroke-width="1"/>
+  <text x="{body_x}" y="{head_y}" fill="{COLORS['muted']}" font-size="11.5"
+        font-family='{FONT_STACK}' font-weight="600" letter-spacing="1.6"
+        text-transform="uppercase">{label.upper()}</text>
+  <text x="{x + w - 22}" y="{head_y}" text-anchor="end" fill="{COLORS['muted_soft']}"
+        font-size="11.5" font-family='{FONT_STACK}' font-weight="500"
+        letter-spacing="1.4" text-transform="uppercase">{right}</text>
+</g>"""
