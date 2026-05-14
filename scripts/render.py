@@ -447,3 +447,69 @@ def render_defs() -> str:
     <rect x="0" y="0" width="100%" height="100%" fill="url(#hatch)"/>
   </mask>
 </defs>"""
+
+
+CANVAS_H = 1024
+
+
+def render(config: dict, data: dict, timestamp) -> str:
+    """Render the full dashboard SVG document.
+
+    `timestamp` is a datetime; we use its UTC time and date.
+    """
+    today = timestamp.date()
+    clock = timestamp.strftime("%H:%M:%S")
+
+    # Grid layout
+    pad = CANVAS_PADDING
+    grid_top = TITLEBAR_H + pad
+    col1_x = pad
+    col1_w = 678
+    col2_x = col1_x + col1_w + pad
+    col2_w = 780
+
+    row1_h = 426
+    row1_y = grid_top
+    row2_h = 354
+    row2_y = row1_y + row1_h + pad
+    row3_h = 106
+    row3_y = row2_y + row2_h + pad
+    full_w = col1_w + pad + col2_w
+
+    statusbar_y = row3_y + row3_h + pad
+
+    me = render_me_panel(config, col1_x, row1_y, col1_w, row1_h, today)
+    langs = render_languages_panel(
+        [tuple(l) for l in data["languages"]], col2_x, row1_y, col2_w, row1_h
+    )
+    activity = render_activity_panel(
+        data["activity"], data["activity_peak"], data["activity_streak"],
+        data["activity_avg"], col1_x, row2_y, col1_w, row2_h,
+    )
+    stats_dict = {
+        "repos": data["public_repos"],
+        "stars": data["total_stars"],
+        "followers": data["followers"],
+        "commits": data["total_commits"],
+        "loc_bytes": data["total_loc_bytes"],
+        "top_repos": data["top_repos"],
+    }
+    stats = render_stats_panel(stats_dict, col2_x, row2_y, col2_w, row2_h)
+    now = render_now_panel(config, col1_x, row3_y, full_w, row3_h)
+    statusbar = render_statusbar(config["statusbar"], clock, statusbar_y)
+    chrome = render_chrome(title_left=config["handle"], title_right=config["machine"])
+    defs = render_defs()
+
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {CANVAS_W} {CANVAS_H}"
+     width="{CANVAS_W}" height="{CANVAS_H}" font-family='{FONT_STACK}'>
+  <rect width="100%" height="100%" fill="{COLORS['bg_outer']}"/>
+  {defs}
+  {chrome}
+  {me}
+  {langs}
+  {activity}
+  {stats}
+  {now}
+  {statusbar}
+</svg>"""
