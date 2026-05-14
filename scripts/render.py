@@ -382,6 +382,61 @@ def render_stats_panel(stats: dict, x: int, y: int, w: int, h: int) -> str:
     return "".join(out)
 
 
+def render_now_panel(cfg: dict, x: int, y: int, w: int, h: int) -> str:
+    frame = render_panel_frame(x, y, w, h, "now", "/etc/8enji.conf")
+
+    body_x = x + 22
+    body_w = w - 44
+    col_gap = 40
+    col_w = (body_w - col_gap) // 2
+    col1_x = body_x
+    col2_x = body_x + col_w + col_gap
+    key_w = 110
+
+    now = cfg["now"]
+    rows = [
+        (col1_x, "building", now["building"]),
+        (col2_x, "learning", now["learning"]),
+        (col1_x, "listening", now["listening"]),
+        (col2_x, "reach", now["reach"]),
+    ]
+
+    row_y_top = y + 70
+    row_h = 30
+
+    out = [frame]
+    # First row pair (building / learning)
+    for cx, k, v in rows[:2]:
+        out.append(
+            f'<text x="{cx}" y="{row_y_top}" fill="{COLORS["purple"]}" font-size="14" '
+            f'font-family=\'{FONT_STACK}\'>{k}</text>'
+        )
+        out.append(
+            f'<text x="{cx + key_w}" y="{row_y_top}" fill="{COLORS["text"]}" font-size="14" '
+            f'font-family=\'{FONT_STACK}\'>{_escape_xml(v)}</text>'
+        )
+    # Dotted dividers below first row
+    for cx in (col1_x, col2_x):
+        out.append(
+            f'<line x1="{cx}" y1="{row_y_top + 12}" x2="{cx + col_w}" y2="{row_y_top + 12}" '
+            f'stroke="rgba(148,163,184,0.06)" stroke-width="1" stroke-dasharray="1 4"/>'
+        )
+
+    # Second row pair (listening / reach)
+    for cx, k, v in rows[2:]:
+        ry = row_y_top + row_h
+        out.append(
+            f'<text x="{cx}" y="{ry}" fill="{COLORS["purple"]}" font-size="14" '
+            f'font-family=\'{FONT_STACK}\'>{k}</text>'
+        )
+        out.append(
+            f'<text x="{cx + key_w}" y="{ry}" fill="{COLORS["text"]}" font-size="14" '
+            f'font-family=\'{FONT_STACK}\'>{_escape_xml(v)}</text>'
+        )
+
+    return "".join(out)
+
+
 def render_defs() -> str:
     """SVG <defs> block: shared patterns/masks. Referenced by panels."""
     return """<defs>
