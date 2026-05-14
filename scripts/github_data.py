@@ -96,6 +96,55 @@ class GitHubClient:
                 days[d["date"]] = d["contributionCount"]
         return {"total_commits": cc["totalCommitContributions"], "days": days}
 
+    def fetch_all(self, today: date) -> dict:
+        user = self.fetch_user()
+        repos = self.fetch_repos()
+        repo_langs: dict[str, dict[str, int]] = {}
+        for r in repos:
+            owner = r["owner"]["login"]
+            name = r["name"]
+            repo_langs[name] = self.fetch_repo_languages(owner, name)
+
+        languages = aggregate_languages(repo_langs)
+        total_loc_bytes = sum(
+            n for langs in repo_langs.values() for n in langs.values()
+        )
+
+        contrib = self.fetch_contributions(today=today)
+        activity = extract_activity(contrib["days"], today=today, window=60)
+        activity_avg = sum(activity) / len(activity) if activity else 0.0
+        activity_peak = max(activity) if activity else 0
+        streak = 0
+        for v in reversed(activity):
+            if v > 0:
+                streak += 1
+            else:
+                break
+
+        top_repos = sorted(repos, key=lambda r: r.get("stargazers_count", 0), reverse=True)[:3]
+        top_repos_clean = [
+            {
+                "name": r["name"],
+                "language": (r.get("language") or "").lower(),
+                "stars": r.get("stargazers_count", 0),
+            }
+            for r in top_repos
+        ]
+
+        return {
+            "followers": user["followers"],
+            "public_repos": user["public_repos"],
+            "total_stars": sum(r.get("stargazers_count", 0) for r in repos),
+            "total_commits": contrib["total_commits"],
+            "total_loc_bytes": total_loc_bytes,
+            "languages": languages,
+            "activity": activity,
+            "activity_avg": float(activity_avg),
+            "activity_peak": int(activity_peak),
+            "activity_streak": streak,
+            "top_repos": top_repos_clean,
+        }
+
 
 def aggregate_languages(
     repo_langs: dict[str, dict[str, int]],
