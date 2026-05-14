@@ -44,3 +44,29 @@ class GitHubClient:
                 break
             page += 1
         return [r for r in repos if not r.get("fork")]
+
+    def fetch_repo_languages(self, owner: str, repo: str) -> dict[str, int]:
+        r = self.session.get(
+            f"{GITHUB_API}/repos/{owner}/{repo}/languages", timeout=15
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+def aggregate_languages(
+    repo_langs: dict[str, dict[str, int]],
+) -> list[tuple[str, float]]:
+    """Combine per-repo language bytes into top-5 lowercased + 'other' percentages."""
+    totals: dict[str, int] = {}
+    for langs in repo_langs.values():
+        for name, n in langs.items():
+            totals[name] = totals.get(name, 0) + n
+
+    grand = sum(totals.values()) or 1
+    sorted_langs = sorted(totals.items(), key=lambda kv: -kv[1])
+    top = sorted_langs[:5]
+    rest_bytes = sum(n for _, n in sorted_langs[5:])
+    out = [(name.lower(), n * 100 / grand) for name, n in top]
+    if rest_bytes:
+        out.append(("other", rest_bytes * 100 / grand))
+    return out
