@@ -164,3 +164,83 @@ def render_me_panel(cfg: dict, x: int, y: int, w: int, h: int, today: date) -> s
     )
 
     return frame + ascii_block + sysinfo + footer
+
+
+LANG_COLOR_MAP = {
+    "typescript": COLORS["ts"],
+    "javascript": COLORS["ts"],
+    "python": COLORS["py"],
+    "go": COLORS["go"],
+    "rust": COLORS["rust"],
+    "lua": COLORS["lua"],
+}
+
+
+def _lang_color(name: str) -> str:
+    return LANG_COLOR_MAP.get(name.lower(), COLORS["other"])
+
+
+def render_languages_panel(languages: list[tuple[str, float]], x: int, y: int, w: int, h: int) -> str:
+    frame = render_panel_frame(x, y, w, h, "languages", "last 12mo")
+
+    # Layout: name(88) | bar(flex) | pct(44), gap 14, padding 22
+    body_x = x + 22
+    body_w = w - 44
+    name_w = 88
+    pct_w = 44
+    gap = 14
+    bar_x = body_x + name_w + gap
+    bar_w = body_w - name_w - pct_w - 2 * gap
+    pct_x = body_x + body_w  # right-aligned
+
+    # 6 rows evenly distributed inside body height (h - header - bottom padding)
+    rows_top = y + 56
+    rows_bottom = y + h - 24
+    row_count = max(len(languages), 1)
+    row_h = (rows_bottom - rows_top) / row_count
+
+    out = [frame]
+    for i, (name, pct) in enumerate(languages):
+        cy = rows_top + i * row_h + row_h / 2
+        text_y = cy + 5
+        bar_y = cy - 7
+        color = _lang_color(name)
+        fill_w = max(0, int(bar_w * (pct / 100)))
+        out.append(
+            f'<text x="{body_x}" y="{text_y}" fill="{COLORS["text"]}" font-size="13" '
+            f'font-family=\'{FONT_STACK}\'>{name}</text>'
+        )
+        # Trough (faint solid + diagonal hatch via pattern reference)
+        out.append(
+            f'<rect x="{bar_x}" y="{bar_y}" width="{bar_w}" height="14" rx="3" ry="3" '
+            f'fill="rgba(255,255,255,0.03)"/>'
+        )
+        out.append(
+            f'<rect x="{bar_x}" y="{bar_y}" width="{bar_w}" height="14" rx="3" ry="3" '
+            f'fill="{color}" fill-opacity="0.22" mask="url(#hatch-mask)"/>'
+        )
+        # Fill
+        out.append(
+            f'<rect x="{bar_x}" y="{bar_y}" width="{fill_w}" height="14" rx="3" ry="3" '
+            f'fill="{color}"/>'
+        )
+        # Percentage
+        out.append(
+            f'<text x="{pct_x}" y="{text_y}" text-anchor="end" fill="{COLORS["text_dim"]}" '
+            f'font-size="13" font-family=\'{FONT_STACK}\' font-variant-numeric="tabular-nums">'
+            f'{int(round(pct))}%</text>'
+        )
+
+    return "".join(out)
+
+
+def render_defs() -> str:
+    """SVG <defs> block: shared patterns/masks. Referenced by panels."""
+    return """<defs>
+  <pattern id="hatch" width="12" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(135)">
+    <line x1="0" y1="0" x2="0" y2="12" stroke="white" stroke-width="6"/>
+  </pattern>
+  <mask id="hatch-mask">
+    <rect x="0" y="0" width="100%" height="100%" fill="url(#hatch)"/>
+  </mask>
+</defs>"""
