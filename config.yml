@@ -19,11 +19,11 @@ statusbar:
   net: ▲ 1.2mb/s
   version: v2.6.0
 tweaks:
-  ascii_size: 9
+  ascii_size: 11
   ascii_color: '#8b95a3'
   accent: '#b6e04f'
-  font_size: 17
-  gap: 60
+  font_size: 16
+  gap: 36
   show_stats: true
   show_languages: true
   show_now: true

@@ -10,7 +10,7 @@ from dataclasses import dataclass, fields
 from datetime import date
 
 
-CANVAS_W = 1280
+CANVAS_W = 1400
 PADDING_X = 48
 PADDING_TOP = 40
 PADDING_BOTTOM = 44
