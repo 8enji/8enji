@@ -152,11 +152,11 @@ def test_hide_now_section():
     assert ">building</text>" not in off
 
 
-def test_canvas_width_is_1400():
+def test_canvas_width_is_1500():
     config, data, ts = _load()
     svg = render(config, data, ts)
-    assert 'width="1400"' in svg
-    assert 'viewBox="0 0 1400' in svg
+    assert 'width="1500"' in svg
+    assert 'viewBox="0 0 1500' in svg
 
 
 def test_titlebar_text_matches_design():

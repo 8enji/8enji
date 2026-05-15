@@ -33,4 +33,4 @@ def test_render_returns_full_svg_document():
     svg = render(config, data, ts)
     assert svg.startswith("<?xml") or svg.startswith("<svg")
     assert svg.rstrip().endswith("</svg>")
-    assert 'viewBox="0 0 1400' in svg
+    assert 'viewBox="0 0 1500' in svg

@@ -10,7 +10,7 @@ from dataclasses import dataclass, fields
 from datetime import date
 
 
-CANVAS_W = 1400
+CANVAS_W = 1500
 PADDING_X = 48
 PADDING_TOP = 40
 PADDING_BOTTOM = 44
@@ -154,6 +154,31 @@ def _top_three_plus_other(
     return top
 
 
+def _estimate_info_height(tweaks: "Tweaks") -> int:
+    """Estimate the info column's total rendered height based on visible
+    sections, without producing any SVG. Used to size the ASCII portrait so
+    both columns share visual weight."""
+    fs = tweaks.font_size
+    kv_line_h = fs + 4
+    h = int(fs * 1.14) + 4              # prompt baseline + margin
+    if tweaks.show_rule:
+        h += fs + 4
+    h += 10                              # spacer after prompt block
+    h += 7 * kv_line_h + 22              # 7 KV rows + margin
+    if tweaks.show_stats:
+        h += int(fs * 0.82) + 10         # section title
+        h += 3 * (fs + 6) + 18           # 3 stat rows + margin
+    if tweaks.show_languages:
+        h += int(fs * 0.82) + 10
+        h += int(fs * 0.93) + 18
+    if tweaks.show_now:
+        h += int(fs * 0.82) + 10
+        h += 4 * kv_line_h + 18
+    if tweaks.show_palette:
+        h += 14 + 12
+    return h
+
+
 def render(
     config: dict,
     data: dict,
@@ -171,17 +196,36 @@ def render(
 
     fs = tweaks.font_size
 
-    # ASCII column dimensions
+    # ASCII dimensions (user-controlled size)
     ascii_lines = config["ascii_art"].rstrip("\n").split("\n")
     max_line_len = max((len(l) for l in ascii_lines), default=0)
-    ascii_w = int(max_line_len * tweaks.ascii_size * MONO_CHAR_W)
-    ascii_line_h = tweaks.ascii_size  # line-height: 1 per design
-    ascii_h = len(ascii_lines) * ascii_line_h
+    num_ascii_lines = max(len(ascii_lines), 1)
+    ascii_size = tweaks.ascii_size
+    ascii_w = int(max_line_len * ascii_size * MONO_CHAR_W)
+    ascii_line_h = ascii_size
+    ascii_h = num_ascii_lines * ascii_line_h
 
     # Layout
     body_x = PADDING_X
     body_y = TITLEBAR_H + PADDING_TOP
     info_x = body_x + ascii_w + tweaks.gap
+
+    # ── Stretch info column gaps so its height matches the ASCII portrait
+    # The natural info content height vs the ASCII height determines how
+    # much extra spacing we distribute between sections.
+    base_info_h = _estimate_info_height(tweaks)
+    if ascii_h > base_info_h:
+        # Count the inter-section margins we can stretch.
+        # The margins are: after-prompt-block (10), after-KV (22), and after
+        # each visible section (stats 18, langs 18, now 18, palette 12).
+        n_stretch = 1 + 1 + sum(
+            1 for visible in (tweaks.show_stats, tweaks.show_languages,
+                              tweaks.show_now, tweaks.show_palette)
+            if visible
+        )
+        extra_per_gap = (ascii_h - base_info_h) // max(n_stretch, 1)
+    else:
+        extra_per_gap = 0
 
     parts: list[str] = []
     info_y = body_y  # tracks the top edge of the next section in the info column
@@ -211,7 +255,7 @@ def render(
         )
         info_y = int(baseline + 4)
 
-    info_y += 10  # spacer after prompt block
+    info_y += 10 + extra_per_gap  # spacer after prompt block (+stretch)
 
     # ── kv block: os / host / shell / editor / wm / theme / uptime
     me = config["me"]
@@ -231,7 +275,7 @@ def render(
     parts.append(
         _render_kv_block(kv_rows, kv_key_x, kv_val_x, info_y, fs, kv_line_h, colors)
     )
-    info_y += len(kv_rows) * kv_line_h + 22
+    info_y += len(kv_rows) * kv_line_h + 22 + extra_per_gap
 
     # ── stats (toggleable) ──────────────────────────────────────
     if tweaks.show_stats:
@@ -266,7 +310,7 @@ def render(
                     f'<line x1="{x}" y1="{row_y + 4}" x2="{x + col_w}" y2="{row_y + 4}" '
                     f'stroke="rgba(148,163,184,0.07)" stroke-width="1" stroke-dasharray="1 3"/>'
                 )
-        info_y += len(stat_pairs) * row_h + 18
+        info_y += len(stat_pairs) * row_h + 18 + extra_per_gap
 
     # ── languages (toggleable, top 3 + other) ───────────────────
     if tweaks.show_languages:
@@ -296,7 +340,7 @@ def render(
             )
             label_w = len(label) * lang_fs * MONO_CHAR_W + dot_size + 8
             x += label_w + gap_between
-        info_y = int(baseline + 18)
+        info_y = int(baseline + 18) + extra_per_gap
 
     # ── now (toggleable) ────────────────────────────────────────
     if tweaks.show_now:
@@ -313,7 +357,7 @@ def render(
                 now_rows, kv_key_x, kv_val_x, info_y, fs, kv_line_h, colors
             )
         )
-        info_y += len(now_rows) * kv_line_h + 18
+        info_y += len(now_rows) * kv_line_h + 18 + extra_per_gap
 
     # ── palette (toggleable, off by default) ────────────────────
     if tweaks.show_palette:
@@ -343,7 +387,7 @@ def render(
     )
     ascii_block = (
         f"<text font-family='{FONT_STACK}' "
-        f'font-size="{tweaks.ascii_size}" fill="{tweaks.ascii_color}" '
+        f'font-size="{ascii_size}" fill="{tweaks.ascii_color}" '
         f'xml:space="preserve" font-weight="500">{ascii_tspans}</text>'
     )
 
