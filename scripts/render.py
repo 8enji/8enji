@@ -31,19 +31,7 @@ PURPLE      = "#c8a2ff"
 ORANGE      = "#f1c47a"
 PINK        = "#ee557d"
 
-LANG_DOT_COLORS: dict[str, str] = {
-    "typescript": "#5fb7ff",
-    "javascript": "#5fb7ff",
-    "python":     "#c8a2ff",
-    "go":         "#b6e04f",
-    "rust":       "#f1c47a",
-    "lua":        "#ee557d",
-    "c":          "#cdd6e1",
-    "c++":        "#cdd6e1",
-    "shell":      "#b6e04f",
-    "html":       "#ee557d",
-    "css":        "#5fb7ff",
-}
+LANG_RANK_COLORS: tuple[str, ...] = (GREEN, PURPLE, PINK)
 LANG_DOT_FALLBACK = MUTED
 
 MONO_STACK = (
@@ -236,9 +224,9 @@ def _build_langs(data: Mapping[str, Any]) -> list[tuple[str, str, str]]:
     top = items[:3]
     rest = sum(v for _, v in items[3:])
     out: list[tuple[str, str, str]] = []
-    for name, count in top:
+    for rank, (name, count) in enumerate(top):
         pct = round(count / total * 100)
-        color = LANG_DOT_COLORS.get(name.lower(), LANG_DOT_FALLBACK)
+        color = LANG_RANK_COLORS[rank]
         out.append((name.lower(), f"{pct}%", color))
     if rest > 0:
         pct = round(rest / total * 100)
