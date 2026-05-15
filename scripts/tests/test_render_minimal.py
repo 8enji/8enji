@@ -29,8 +29,10 @@ def test_renders_prompt_with_handle_and_machine():
 def test_renders_kv_block_with_all_sysinfo_rows():
     config, data, ts = _load()
     svg = render(config, data, ts)
-    for key in ("os", "host", "shell", "editor", "wm", "theme", "uptime"):
+    for key in ("os", "host", "shell", "editor", "theme", "uptime"):
         assert f">{key}</text>" in svg
+    # 'wm' was dropped in the minimal redesign — assert it's gone
+    assert ">wm</text>" not in svg
     assert config["website"] in svg
     assert config["me"]["theme"] in svg
 
@@ -152,11 +154,11 @@ def test_hide_now_section():
     assert ">building</text>" not in off
 
 
-def test_canvas_width_is_1500():
+def test_canvas_width_is_1280():
     config, data, ts = _load()
     svg = render(config, data, ts)
-    assert 'width="1500"' in svg
-    assert 'viewBox="0 0 1500' in svg
+    assert 'width="1280"' in svg
+    assert 'viewBox="0 0 1280' in svg
 
 
 def test_titlebar_text_matches_design():
@@ -166,10 +168,10 @@ def test_titlebar_text_matches_design():
     assert "96×32" in svg
 
 
-def test_ascii_size_changes_font_size_attribute():
+def test_ascii_size_follows_variant():
     config, data, ts = _load()
-    small = render(config, data, ts, tweaks=Tweaks(ascii_size=5))
-    big = render(config, data, ts, tweaks=Tweaks(ascii_size=11))
+    small = render(config, data, ts, tweaks=Tweaks(ascii_variant="small", ascii_size_small=5))
+    big = render(config, data, ts, tweaks=Tweaks(ascii_variant="large", ascii_size_large=11))
     assert 'font-size="5"' in small
     assert 'font-size="11"' in big
 

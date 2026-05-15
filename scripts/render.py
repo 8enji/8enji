@@ -10,11 +10,8 @@ from dataclasses import dataclass, fields
 from datetime import date
 
 
-CANVAS_W = 1500
-PADDING_X = 48
-PADDING_TOP = 40
-PADDING_BOTTOM = 44
-TITLEBAR_H = 45
+CANVAS_W = 1280
+TITLEBAR_H = 40
 STATUSBAR_H = 36
 
 
@@ -84,21 +81,29 @@ LANG_DOT_COLORS = {
 
 @dataclass
 class Tweaks:
-    """Visual knobs for the minimal layout. Defaults match the design's
-    saved tweaks block (asciiSize=9, fontSize=17, gap=60, showRule=false,
-    showPalette=false, showStatusBar=false)."""
+    """Visual knobs for the minimal layout. Defaults mirror the saved
+    EDITMODE-BEGIN block from readme-minimal.html: small ascii variant at
+    12px, info font 19px, padX 88, padY 44, gap 44, optional sections off."""
 
-    ascii_size: int = 9
+    ascii_variant: str = "small"
+    ascii_size_small: int = 12
+    ascii_size_large: int = 7
     ascii_color: str = "#8b95a3"
     accent: str = "#b6e04f"
-    font_size: int = 17
-    gap: int = 60
+    font_size: int = 19
+    pad_x: int = 88
+    pad_y: int = 44
+    gap: int = 44
     show_stats: bool = True
     show_languages: bool = True
     show_now: bool = True
     show_palette: bool = False
     show_statusbar: bool = False
     show_rule: bool = False
+
+    @property
+    def ascii_size(self) -> int:
+        return self.ascii_size_small if self.ascii_variant == "small" else self.ascii_size_large
 
     @classmethod
     def from_config(cls, config: dict) -> "Tweaks":
@@ -159,18 +164,19 @@ def _estimate_info_height(tweaks: "Tweaks") -> int:
     sections, without producing any SVG. Used to size the ASCII portrait so
     both columns share visual weight."""
     fs = tweaks.font_size
-    kv_line_h = fs + 4
-    h = int(fs * 1.14) + 4              # prompt baseline + margin
+    kv_line_h = int(fs * 1.4)
+    stat_row_h = int(fs * 1.6)
+    h = int(fs * 1.14) + 4               # prompt baseline + margin
     if tweaks.show_rule:
-        h += fs + 4
+        h += fs + 18                     # rule + margin
     h += 10                              # spacer after prompt block
-    h += 7 * kv_line_h + 22              # 7 KV rows + margin
+    h += 6 * kv_line_h + 22              # 6 KV rows + margin
     if tweaks.show_stats:
         h += int(fs * 0.82) + 10         # section title
-        h += 3 * (fs + 6) + 18           # 3 stat rows + margin
+        h += 3 * stat_row_h + 22         # 3 stat rows + margin
     if tweaks.show_languages:
         h += int(fs * 0.82) + 10
-        h += int(fs * 0.93) + 18
+        h += int(fs * 0.93) + 22
     if tweaks.show_now:
         h += int(fs * 0.82) + 10
         h += 4 * kv_line_h + 18
@@ -196,8 +202,10 @@ def render(
 
     fs = tweaks.font_size
 
-    # ASCII dimensions (user-controlled size)
-    ascii_lines = config["ascii_art"].rstrip("\n").split("\n")
+    # ASCII dimensions — variant chooses between two source blocks in config
+    ascii_key = "ascii_art_small" if tweaks.ascii_variant == "small" else "ascii_art"
+    ascii_source = config.get(ascii_key) or config["ascii_art"]
+    ascii_lines = ascii_source.rstrip("\n").split("\n")
     max_line_len = max((len(l) for l in ascii_lines), default=0)
     num_ascii_lines = max(len(ascii_lines), 1)
     ascii_size = tweaks.ascii_size
@@ -205,27 +213,28 @@ def render(
     ascii_line_h = ascii_size
     ascii_h = num_ascii_lines * ascii_line_h
 
-    # Layout
-    body_x = PADDING_X
-    body_y = TITLEBAR_H + PADDING_TOP
+    # Layout (pad_x / pad_y come from tweaks, matching readme-minimal.html)
+    body_x = tweaks.pad_x
+    body_y = TITLEBAR_H + tweaks.pad_y
     info_x = body_x + ascii_w + tweaks.gap
 
-    # ── Stretch info column gaps so its height matches the ASCII portrait
-    # The natural info content height vs the ASCII height determines how
-    # much extra spacing we distribute between sections.
+    # ── Match heights between ASCII and info column ─────────────
+    # If the info column is naturally taller (typical for the small variant)
+    # we shift the ASCII down to center it against the info. If the ASCII
+    # is taller (typical for the large variant) we instead stretch the
+    # info column's inter-section gaps so both columns share visual weight.
     base_info_h = _estimate_info_height(tweaks)
+    ascii_y_offset = 0
+    extra_per_gap = 0
     if ascii_h > base_info_h:
-        # Count the inter-section margins we can stretch.
-        # The margins are: after-prompt-block (10), after-KV (22), and after
-        # each visible section (stats 18, langs 18, now 18, palette 12).
         n_stretch = 1 + 1 + sum(
             1 for visible in (tweaks.show_stats, tweaks.show_languages,
                               tweaks.show_now, tweaks.show_palette)
             if visible
         )
         extra_per_gap = (ascii_h - base_info_h) // max(n_stretch, 1)
-    else:
-        extra_per_gap = 0
+    elif tweaks.ascii_variant == "small":
+        ascii_y_offset = max(0, (base_info_h - ascii_h) // 2)
 
     parts: list[str] = []
     info_y = body_y  # tracks the top edge of the next section in the info column
@@ -253,46 +262,46 @@ def render(
             f'font-size="{fs}" fill="{colors["muted_soft"]}">'
             f"─────────────────────────</text>"
         )
-        info_y = int(baseline + 4)
+        info_y = int(baseline + 18)  # rule margin-bottom
 
     info_y += 10 + extra_per_gap  # spacer after prompt block (+stretch)
 
-    # ── kv block: os / host / shell / editor / wm / theme / uptime
+    # ── kv block: os / host / shell / editor / theme / uptime ────
     me = config["me"]
     kv_rows = [
         ("os", me["os"]),
         ("host", config["website"]),
         ("shell", me["shell"]),
         ("editor", me["editor"]),
-        ("wm", me["wm"]),
         ("theme", me["theme"]),
         ("uptime", _format_uptime(me["uptime_from"], today)),
     ]
-    kv_col_w = int(fs * 5.5)  # ~96px at font_size 17
+    kv_col_w = 96  # fixed at 96px in the design
     kv_key_x = info_x
     kv_val_x = info_x + kv_col_w + 18
-    kv_line_h = fs + 4
+    kv_line_h = int(fs * 1.4)
     parts.append(
         _render_kv_block(kv_rows, kv_key_x, kv_val_x, info_y, fs, kv_line_h, colors)
     )
     info_y += len(kv_rows) * kv_line_h + 22 + extra_per_gap
 
-    # ── stats (toggleable) ──────────────────────────────────────
+    # ── stats (toggleable, 2-column grid in DOM order) ──────────
     if tweaks.show_stats:
         info_y = _render_section_title(parts, "stats", info_x, info_y, fs, colors)
+        # Grid order matches the HTML source: row-major fill of a 2-col grid.
         stat_pairs = [
             [("repos", str(data["public_repos"])),
-             ("commits", format_compact(data["total_commits"]))],
-            [("stars", _stars_with_glyph(data["total_stars"], colors)),
-             ("streak", f'{data["activity_streak"]}d')],
+             ("stars", _stars_with_glyph(data["total_stars"], colors))],
             [("followers", str(data["followers"])),
+             ("commits", format_compact(data["total_commits"]))],
+            [("streak", f'{data["activity_streak"]}d'),
              ("loc", format_loc(data["total_loc_bytes"]))],
         ]
         col_count = 2
-        info_w = CANVAS_W - info_x - PADDING_X
+        info_w = CANVAS_W - info_x - tweaks.pad_x
         col_gap = 32
         col_w = (info_w - col_gap * (col_count - 1)) // col_count
-        row_h = fs + 6
+        row_h = int(fs * 1.6)
         for row_idx, pair in enumerate(stat_pairs):
             row_y = info_y + fs + row_idx * row_h
             for col_idx, (k, v_text) in enumerate(pair):
@@ -307,10 +316,10 @@ def render(
                     f'font-variant-numeric="tabular-nums">{v_text}</text>'
                 )
                 parts.append(
-                    f'<line x1="{x}" y1="{row_y + 4}" x2="{x + col_w}" y2="{row_y + 4}" '
+                    f'<line x1="{x}" y1="{row_y + 6}" x2="{x + col_w}" y2="{row_y + 6}" '
                     f'stroke="rgba(148,163,184,0.07)" stroke-width="1" stroke-dasharray="1 3"/>'
                 )
-        info_y += len(stat_pairs) * row_h + 18 + extra_per_gap
+        info_y += len(stat_pairs) * row_h + 22 + extra_per_gap
 
     # ── languages (toggleable, top 3 + other) ───────────────────
     if tweaks.show_languages:
@@ -340,7 +349,7 @@ def render(
             )
             label_w = len(label) * lang_fs * MONO_CHAR_W + dot_size + 8
             x += label_w + gap_between
-        info_y = int(baseline + 18) + extra_per_gap
+        info_y = int(baseline + 22) + extra_per_gap
 
     # ── now (toggleable) ────────────────────────────────────────
     if tweaks.show_now:
@@ -379,9 +388,10 @@ def render(
             )
         info_y += sw_h + 12
 
-    # ── ASCII portrait (left column) ────────────────────────────
+    # ── ASCII portrait (left column, optionally centered) ───────
+    ascii_top = body_y + ascii_y_offset
     ascii_tspans = "".join(
-        f'<tspan x="{body_x}" y="{body_y + (i + 1) * ascii_line_h}">'
+        f'<tspan x="{body_x}" y="{ascii_top + (i + 1) * ascii_line_h}">'
         f"{_escape_xml(line)}</tspan>"
         for i, line in enumerate(ascii_lines)
     )
@@ -392,8 +402,8 @@ def render(
     )
 
     # ── canvas height ───────────────────────────────────────────
-    content_bottom = max(info_y, body_y + ascii_h)
-    canvas_h = content_bottom + PADDING_BOTTOM
+    content_bottom = max(info_y, ascii_top + ascii_h)
+    canvas_h = content_bottom + tweaks.pad_y + 4  # CSS uses padY top + (padY+4) bottom
     if tweaks.show_statusbar:
         canvas_h += STATUSBAR_H
 
@@ -455,7 +465,9 @@ def _render_kv_block(
     line_h: int,
     colors: dict,
 ) -> str:
-    """Render a key/value grid with purple keys and light values."""
+    """Render a key/value grid with purple keys and light values. The ' · '
+    middle-dot separator inside values is emitted as a dim tspan to match
+    the <span class="dim">·</span> wrapping in the design."""
     out = []
     for i, (k, v) in enumerate(rows):
         row_y = start_y + fs + i * line_h
@@ -465,13 +477,27 @@ def _render_kv_block(
         )
         out.append(
             f'<text x="{val_x}" y="{row_y}" font-family=\'{FONT_STACK}\' '
-            f'font-size="{fs}" fill="{colors["text"]}">{_escape_xml(v)}</text>'
+            f'font-size="{fs}" fill="{colors["text"]}">'
+            f'{_render_value_with_dim_dots(v, colors)}</text>'
         )
+    return "".join(out)
+
+
+def _render_value_with_dim_dots(value: str, colors: dict) -> str:
+    """Split a value on ' · ' and wrap each separator in a dim tspan."""
+    parts = value.split(" · ")
+    if len(parts) == 1:
+        return _escape_xml(value)
+    out = [_escape_xml(parts[0])]
+    for chunk in parts[1:]:
+        out.append(f' <tspan fill="{colors["muted"]}">·</tspan> ')
+        out.append(_escape_xml(chunk))
     return "".join(out)
 
 
 def _render_chrome(title: str, canvas_h: int) -> str:
     """Window border + titlebar (traffic lights + centered title)."""
+    cy = TITLEBAR_H // 2
     return (
         f'<g class="chrome">'
         f'<rect x="0" y="0" width="{CANVAS_W}" height="{canvas_h}" '
@@ -479,10 +505,10 @@ def _render_chrome(title: str, canvas_h: int) -> str:
         f'stroke="rgba(255,255,255,0.06)" stroke-width="1"/>'
         f'<line x1="0" y1="{TITLEBAR_H}" x2="{CANVAS_W}" y2="{TITLEBAR_H}" '
         f'stroke="rgba(255,255,255,0.05)" stroke-width="1"/>'
-        f'<circle cx="26" cy="{TITLEBAR_H // 2}" r="6" fill="#ff5f57"/>'
-        f'<circle cx="46" cy="{TITLEBAR_H // 2}" r="6" fill="#febc2e"/>'
-        f'<circle cx="66" cy="{TITLEBAR_H // 2}" r="6" fill="#28c840"/>'
-        f'<text x="{CANVAS_W // 2}" y="{TITLEBAR_H // 2 + 5}" '
+        f'<circle cx="24" cy="{cy}" r="6" fill="#ff5f57"/>'
+        f'<circle cx="44" cy="{cy}" r="6" fill="#febc2e"/>'
+        f'<circle cx="64" cy="{cy}" r="6" fill="#28c840"/>'
+        f'<text x="{CANVAS_W // 2}" y="{cy + 5}" '
         f'text-anchor="middle" fill="{COLORS["text_dim"]}" '
         f'font-size="13.5" font-family=\'{FONT_STACK}\'>{title}</text>'
         f"</g>"
