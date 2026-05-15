@@ -31,7 +31,10 @@ jobs:
 
       - name: Generate dashboard
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # DASHBOARD_TOKEN is a PAT with `repo` + `read:user` scopes so commit
+          # search and the contributions GraphQL API return the full user view
+          # (the default GITHUB_TOKEN is too restricted to see all of them).
+          GITHUB_TOKEN: ${{ secrets.DASHBOARD_TOKEN || secrets.GITHUB_TOKEN }}
         run: python -m scripts.generate
 
       - name: Commit if changed
