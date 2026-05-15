@@ -127,8 +127,6 @@ class GitHubClient:
         contrib = self.fetch_contributions(today=today)
         total_commits = self.fetch_total_commits()
         activity = extract_activity(contrib["days"], today=today, window=60)
-        import sys
-        sys.stderr.write(f"DEBUG today={today} last7={activity[-7:]} days_sample={ {(today - __import__('datetime').timedelta(days=i)).isoformat(): contrib['days'].get((today - __import__('datetime').timedelta(days=i)).isoformat(), 0) for i in range(7)} }\n")
         activity_avg = sum(activity) / len(activity) if activity else 0.0
         activity_peak = max(activity) if activity else 0
         # Streak = consecutive active days ending today (or yesterday, if no
