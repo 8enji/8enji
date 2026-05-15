@@ -346,8 +346,9 @@ def render(config: Mapping[str, Any], data: Mapping[str, Any]) -> str:
             info_x, y_at(m["stats_title_y"]),
             MUTED, m["section_fs"], _e("STATS"), weight="600",
         ))
-        stat_col_w   = 280
+        # Fill the available info width so the right edge lines up with pad_x.
         stat_col_gap = 32
+        stat_col_w   = (CANVAS_W - info_x - tw.pad_x - stat_col_gap) // 2
         for i, (k, v) in enumerate(stats):
             col = i % 2
             row = i // 2
