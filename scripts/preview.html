@@ -54,7 +54,7 @@
   button.secondary:hover { color: var(--text); border-color: var(--text-dim); }
 
   main { background: #0a0d12; padding: 28px; overflow: auto; }
-  .stage { max-width: 1500px; margin: 0 auto; }
+  .stage { max-width: 1280px; margin: 0 auto; }
   .stage .frame { background: var(--bg); border-radius: 14px; overflow: hidden; box-shadow: 0 40px 100px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.04) inset; }
   .stage img { display: block; width: 100%; height: auto; }
   .stage .caption { font-size: 11px; color: var(--muted); margin: 14px 4px 0; letter-spacing: 0.08em; text-transform: uppercase; }
@@ -65,40 +65,58 @@
   <div class="layout">
     <aside>
       <h1><span class="dot"></span>tweaks</h1>
-      <p class="sub">readme.dashboard / live preview</p>
+      <p class="sub">readme.minimal / live preview</p>
 
-      <h2>Color</h2>
+      <h2>ASCII</h2>
+      <div class="field">
+        <div class="field-label"><span>Size</span><span class="val" data-for="ascii_size">9px</span></div>
+        <input type="range" data-key="ascii_size" data-suffix="px" min="5" max="14" step="1" value="9">
+      </div>
+      <div class="field">
+        <div class="field-label"><span>Color</span><span class="val" data-for="ascii_color"></span></div>
+        <input type="color" data-key="ascii_color" value="#8b95a3">
+      </div>
+      <div class="field">
+        <div class="field-label"><span>Gap to info</span><span class="val" data-for="gap">60px</span></div>
+        <input type="range" data-key="gap" data-suffix="px" min="24" max="120" step="4" value="60">
+      </div>
+
+      <h2>Type</h2>
+      <div class="field">
+        <div class="field-label"><span>Font size</span><span class="val" data-for="font_size">17px</span></div>
+        <input type="range" data-key="font_size" data-suffix="px" min="11" max="22" step="1" value="17">
+      </div>
+
+      <h2>Theme</h2>
       <div class="field">
         <div class="field-label"><span>Accent</span><span class="val" data-for="accent"></span></div>
         <input type="color" data-key="accent" value="#b6e04f">
       </div>
-
-      <h2>Size</h2>
-      <div class="field">
-        <div class="field-label"><span>ASCII size</span><span class="val" data-for="ascii_size">5px</span></div>
-        <input type="range" data-key="ascii_size" data-suffix="px" min="3" max="14" step="1" value="5">
-      </div>
-      <div class="field">
-        <div class="field-label"><span>Bar height</span><span class="val" data-for="bar_height">14px</span></div>
-        <input type="range" data-key="bar_height" data-suffix="px" min="6" max="24" step="1" value="14">
-      </div>
-      <div class="field">
-        <div class="field-label"><span>Font scale</span><span class="val" data-for="font_scale">1.00x</span></div>
-        <input type="range" data-key="font_scale" data-suffix="x" data-format="float" min="0.7" max="1.4" step="0.05" value="1.0">
+      <div class="field toggle">
+        <input type="checkbox" id="t-rule" data-key="show_rule">
+        <label for="t-rule">Rule under prompt</label>
       </div>
 
-      <h2>Visibility</h2>
+      <h2>Sections</h2>
       <div class="field toggle">
-        <input type="checkbox" id="t-statusbar" data-key="show_statusbar" checked>
-        <label for="t-statusbar">Show statusbar</label>
+        <input type="checkbox" id="t-stats" data-key="show_stats" checked>
+        <label for="t-stats">Stats</label>
       </div>
       <div class="field toggle">
-        <input type="checkbox" id="t-sysinfo" data-key="show_sysinfo" checked>
-        <label for="t-sysinfo">Show sysinfo block</label>
+        <input type="checkbox" id="t-langs" data-key="show_languages" checked>
+        <label for="t-langs">Languages</label>
       </div>
       <div class="field toggle">
-        <input type="checkbox" id="t-secondnow" data-key="show_second_now_col" checked>
-        <label for="t-secondnow">Two-column NOW</label>
+        <input type="checkbox" id="t-now" data-key="show_now" checked>
+        <label for="t-now">Now</label>
+      </div>
+      <div class="field toggle">
+        <input type="checkbox" id="t-palette" data-key="show_palette">
+        <label for="t-palette">Palette</label>
+      </div>
+      <div class="field toggle">
+        <input type="checkbox" id="t-statusbar" data-key="show_statusbar">
+        <label for="t-statusbar">Status bar</label>
       </div>
 
       <h2>config.yml snippet</h2>
@@ -143,22 +161,22 @@
       const input = document.querySelector(`[data-key="${key}"]`);
       if (!input) return;
       const suffix = input.dataset.suffix || '';
-      const fmt = input.dataset.format;
       let v;
-      if (input.type === 'range') {
-        v = parseFloat(input.value);
-        if (fmt === 'float') v = v.toFixed(2);
-      } else {
-        v = input.value;
-      }
+      if (input.type === 'range') v = parseFloat(input.value);
+      else v = input.value;
       el.textContent = String(v) + suffix;
     });
   }
 
+  const yamlOrder = [
+    'ascii_size', 'ascii_color', 'accent', 'font_size', 'gap',
+    'show_stats', 'show_languages', 'show_now',
+    'show_palette', 'show_statusbar', 'show_rule',
+  ];
+
   function toYaml(state) {
     const lines = ['tweaks:'];
-    const order = ['accent', 'ascii_size', 'bar_height', 'show_statusbar', 'show_sysinfo', 'show_second_now_col', 'font_scale'];
-    for (const k of order) {
+    for (const k of yamlOrder) {
       if (!(k in state)) continue;
       const v = state[k];
       let cls, formatted;

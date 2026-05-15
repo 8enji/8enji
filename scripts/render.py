@@ -1,229 +1,64 @@
-"""SVG renderer for the 8enji dashboard.
+"""SVG renderer for the 8enji minimal dashboard (neofetch-style).
 
-Pure functions: no I/O, no global state. Coordinates and colors derive
-from the design at readme/project/readme.html in the design handoff.
+Pure functions: no I/O, no global state. Mirrors the design at
+readme/project/readme-minimal.html in the design handoff — ASCII
+portrait on the left, structured info column on the right.
 """
 
 import re
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, fields
 from datetime import date
 
-CANVAS_W = 1500
-CANVAS_PADDING = 14
 
-COLORS = {
-    "bg_outer": "#07090d",
-    "bg": "#0e1218",
-    "panel_border": "rgba(148,163,184,0.10)",
-    "text": "#cdd6e1",
-    "text_dim": "#8b95a3",
-    "muted": "#5a6473",
-    "muted_soft": "#3f4753",
-    "purple": "#c8a2ff",
-    "green": "#b6e04f",
-    "orange": "#f1c47a",
-    "ts": "#5fb7ff",
-    "py": "#c8a2ff",
-    "go": "#b6e04f",
-    "rust": "#f1c47a",
-    "lua": "#ee557d",
-    "other": "#ee557d",
-}
-
-FONT_STACK = '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
-
+CANVAS_W = 1280
+PADDING_X = 48
+PADDING_TOP = 40
+PADDING_BOTTOM = 44
 TITLEBAR_H = 45
 STATUSBAR_H = 36
 
 
-@dataclass
-class Tweaks:
-    """Knobs the preview tool exposes for visual tuning. Backward-compatible
-    defaults match the design exactly — passing no tweaks reproduces the
-    original render byte-for-byte."""
+COLORS = {
+    "bg_outer": "#07090d",
+    "bg": "#0e1218",
+    "text": "#cdd6e1",
+    "text_dim": "#8b95a3",
+    "muted": "#5a6473",
+    "muted_soft": "#3f4753",
+    "green": "#b6e04f",
+    "purple": "#c8a2ff",
+    "orange": "#f1c47a",
+    "pink": "#ee557d",
+    "ts": "#5fb7ff",
+    "rust": "#f1c47a",
+    "lua": "#ee557d",
+    "cyan": "#5fd9c8",
+    "palette_bg": "#1a1f29",
+}
 
-    accent: str = "#b6e04f"
-    ascii_size: int = 5
-    bar_height: int = 14
-    show_statusbar: bool = True
-    show_sysinfo: bool = True
-    show_second_now_col: bool = True
-    font_scale: float = 1.0
+FONT_STACK = '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
 
-    @classmethod
-    def from_config(cls, config: dict) -> "Tweaks":
-        """Build Tweaks from config['tweaks'] dict, ignoring unknown keys."""
-        raw = config.get("tweaks") or {}
-        valid = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in raw.items() if k in valid})
+# Approximate horizontal character width as a fraction of font-size for
+# monospace. JetBrains Mono ~0.6; we use 0.55 to leave a little air.
+MONO_CHAR_W = 0.55
 
-
-def render_chrome(title_left: str, title_right: str) -> str:
-    """Render the window border + titlebar. Returns a single <g> string."""
-    title = f"btop — <tspan font-weight='500' fill='{COLORS['text']}'>{title_left}.{title_right}</tspan>"
-    return f"""<g class="chrome">
-  <rect x="0" y="0" width="{CANVAS_W}" height="100%" rx="14" ry="14" fill="{COLORS['bg']}" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-  <line x1="0" y1="{TITLEBAR_H}" x2="{CANVAS_W}" y2="{TITLEBAR_H}" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
-  <circle cx="26" cy="{TITLEBAR_H // 2}" r="6" fill="#ff5f57"/>
-  <circle cx="46" cy="{TITLEBAR_H // 2}" r="6" fill="#febc2e"/>
-  <circle cx="66" cy="{TITLEBAR_H // 2}" r="6" fill="#28c840"/>
-  <text x="{CANVAS_W // 2}" y="{TITLEBAR_H // 2 + 5}" text-anchor="middle" fill="{COLORS['text_dim']}" font-size="13.5" font-family='{FONT_STACK}'>{title}</text>
-</g>"""
-
-
-def render_statusbar(cfg: dict, clock: str, y: int) -> str:
-    """Render the bottom statusbar at vertical position `y`."""
-    left_x = 22
-    right_x = CANVAS_W - 22
-    text_y = y + 22
-    cs = COLORS["muted_soft"]
-    fs = 11.5
-    family = FONT_STACK
-    return f"""<g class="statusbar">
-  <line x1="0" y1="{y}" x2="{CANVAS_W}" y2="{y}" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
-  <circle cx="{left_x + 4}" cy="{text_y - 4}" r="3" fill="{COLORS['green']}"/>
-  <text x="{left_x + 16}" y="{text_y}" fill="{cs}" font-size="{fs}" font-family='{family}' letter-spacing="1.4">CPU {cfg['cpu']}</text>
-  <text x="{left_x + 130}" y="{text_y}" fill="{cs}" font-size="{fs}" font-family='{family}' letter-spacing="1.4">MEM {cfg['mem']}</text>
-  <text x="{left_x + 240}" y="{text_y}" fill="{cs}" font-size="{fs}" font-family='{family}' letter-spacing="1.4">NET {cfg['net']}</text>
-  <text x="{right_x - 240}" y="{text_y}" fill="{cs}" font-size="{fs}" font-family='{family}' letter-spacing="1.4">{cfg['version']}</text>
-  <text x="{right_x - 130}" y="{text_y}" fill="{cs}" font-size="{fs}" font-family='{family}' letter-spacing="1.4">UTF-8</text>
-  <text x="{right_x - 70}" y="{text_y}" fill="{cs}" font-size="{fs}" font-family='{family}' letter-spacing="1.4">NOR</text>
-  <text x="{right_x}" y="{text_y}" text-anchor="end" fill="{cs}" font-size="{fs}" font-family='{family}' letter-spacing="1.4">{clock}</text>
-</g>"""
-
-
-def render_panel_frame(x: int, y: int, w: int, h: int, label: str, right: str = "") -> str:
-    """Render an empty panel: rounded border + heading row.
-
-    Header text uses uppercase tracked letter-spacing per the design.
-    """
-    head_y = y + 28
-    body_x = x + 22
-    return f"""<g class="panel" data-label="{label}">
-  <rect x="{x}" y="{y}" width="{w}" height="{h}" rx="9" ry="9"
-        fill="rgba(255,255,255,0.012)" stroke="{COLORS['panel_border']}" stroke-width="1"/>
-  <text x="{body_x}" y="{head_y}" fill="{COLORS['muted']}" font-size="11.5"
-        font-family='{FONT_STACK}' font-weight="600" letter-spacing="1.6"
-        text-transform="uppercase">{label.upper()}</text>
-  <text x="{x + w - 22}" y="{head_y}" text-anchor="end" fill="{COLORS['muted_soft']}"
-        font-size="11.5" font-family='{FONT_STACK}' font-weight="500"
-        letter-spacing="1.4" text-transform="uppercase">{right}</text>
-</g>"""
-
-
-def _format_uptime(uptime_from: str, today: date) -> str:
-    """Convert ISO date string to `Ny Md` since that date."""
-    start = date.fromisoformat(uptime_from)
-    delta_days = (today - start).days
-    years = delta_days // 365
-    days = delta_days % 365
-    return f"{years}y {days}d"
-
-
-def _escape_xml(s: str) -> str:
-    """Minimal XML escape for text content."""
-    return (
-        s.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-    )
-
-
-def render_me_panel(
-    cfg: dict,
-    x: int,
-    y: int,
-    w: int,
-    h: int,
-    today: date,
-    *,
-    ascii_size: int = 8,
-    show_sysinfo: bool = True,
-) -> str:
-    frame = render_panel_frame(x, y, w, h, "me", "/etc/8enji.png")
-
-    # ASCII portrait — fixed-width font, line-height 1.05
-    ascii_lines = cfg["ascii_art"].rstrip("\n").split("\n")
-    ascii_x = x + 22
-    ascii_y = y + 56
-    line_height = ascii_size * 1.05
-    ascii_tspans = "".join(
-        f'<tspan x="{ascii_x}" dy="{0 if i == 0 else line_height}">{_escape_xml(line)}</tspan>'
-        for i, line in enumerate(ascii_lines)
-    )
-    ascii_block = (
-        f'<text font-family=\'{FONT_STACK}\' font-size="{ascii_size}" fill="{COLORS["text_dim"]}" '
-        f'xml:space="preserve" font-weight="500" y="{ascii_y}">{ascii_tspans}</text>'
-    )
-
-    # Sysinfo table — purple keys, light values
-    sysinfo = ""
-    if show_sysinfo:
-        me = cfg["me"]
-        sys_rows = [
-            ("host", f'{cfg["handle"]}<tspan fill="{COLORS["muted"]}">@</tspan>{cfg["machine"]}'),
-            ("os", me["os"]),
-            ("shell", me["shell"]),
-            ("editor", me["editor"]),
-            ("wm", me["wm"]),
-            ("theme", me["theme"]),
-            ("uptime", _format_uptime(me["uptime_from"], today)),
-        ]
-        sys_x_key = x + 380
-        sys_x_val = sys_x_key + 90
-        sys_y_start = y + h // 2 - (len(sys_rows) * 22) // 2 + 8
-        sys_lines = []
-        for i, (k, v) in enumerate(sys_rows):
-            row_y = sys_y_start + i * 22
-            sys_lines.append(
-                f'<text x="{sys_x_key}" y="{row_y}" fill="{COLORS["purple"]}" font-size="13" font-family=\'{FONT_STACK}\'>{k}</text>'
-            )
-            sys_lines.append(
-                f'<text x="{sys_x_val}" y="{row_y}" fill="{COLORS["text"]}" font-size="13" font-family=\'{FONT_STACK}\'>{v}</text>'
-            )
-        sysinfo = "\n".join(sys_lines)
-
-    # Footer — handle · website ……… online
-    footer_y = y + h - 22
-    footer_top = footer_y - 14
-    footer = (
-        f'<line x1="{x + 22}" y1="{footer_top}" x2="{x + w - 22}" y2="{footer_top}" '
-        f'stroke="rgba(148,163,184,0.08)" stroke-width="1" stroke-dasharray="3 3"/>'
-        f'<text x="{x + 22}" y="{footer_y}" fill="{COLORS["muted"]}" font-size="11.5" '
-        f'font-family=\'{FONT_STACK}\' letter-spacing="1.8" text-transform="uppercase">'
-        f'{cfg["handle"]} <tspan fill="{COLORS["muted_soft"]}">·</tspan> {cfg["website"]}</text>'
-        f'<text x="{x + w - 22}" y="{footer_y}" text-anchor="end" fill="{COLORS["green"]}" '
-        f'font-size="11.5" font-family=\'{FONT_STACK}\' letter-spacing="1.8" text-transform="uppercase">'
-        f'// online</text>'
-    )
-
-    return frame + ascii_block + sysinfo + footer
-
-
-LANG_COLOR_MAP = {
-    # Design palette
+LANG_DOT_COLORS = {
     "typescript":  COLORS["ts"],
     "javascript":  "#f1e05a",
-    "python":      COLORS["py"],
-    "go":          COLORS["go"],
+    "python":      COLORS["purple"],
+    "go":          COLORS["green"],
     "rust":        COLORS["rust"],
     "lua":         COLORS["lua"],
-    # Extended palette — vibrant colors tuned for dark theme
     "java":        "#f89820",
     "kotlin":      "#a97bff",
     "swift":       "#ff7e3b",
-    "objective-c": "#438eff",
     "ruby":        "#cc342d",
     "php":         "#787cb5",
     "html":        "#e44d26",
     "css":         "#5fb7ff",
     "scss":        "#cc6699",
-    "sass":        "#cc6699",
     "shell":       "#89e051",
     "bash":        "#89e051",
-    "zsh":         "#89e051",
-    "powershell":  "#3a8fb7",
     "c":           "#a8b9cc",
     "c++":         "#f34b7d",
     "c#":          "#9b4dca",
@@ -234,163 +69,57 @@ LANG_COLOR_MAP = {
     "scala":       "#dc6868",
     "haskell":     "#a78bfa",
     "elixir":      "#a97bff",
-    "erlang":      "#b83998",
     "perl":        "#0fc4dc",
-    "ocaml":       "#ee8e30",
-    "clojure":     "#b6e04f",
-    "elm":         "#7fb8d4",
     "matlab":      "#e16737",
+    "objective-c": "#438eff",
     "sql":         "#e38c00",
-    "graphql":     "#e535ab",
-    "tex":         "#82b541",
-    "latex":       "#82b541",
     "markdown":    COLORS["text_dim"],
     "dockerfile":  "#0db7ed",
-    "makefile":    "#b6e04f",
-    "cmake":       "#e76f51",
     "yaml":        "#e5c07b",
     "json":        "#cdd6e1",
-    "toml":        "#9c4221",
-    "vim script":  "#019733",
-    "lua-luvit":   COLORS["lua"],
-    "fish":        "#4eada4",
-    "nix":         "#7e7eff",
-    "zig":         "#ec915c",
-    "v":           "#5d87bf",
-    "crystal":     "#cdd6e1",
-    "julia":       "#a270ba",
-    "wasm":        "#04133b",
-    "assembly":    "#6e4c13",
+    "tex":         "#82b541",
+    "latex":       "#82b541",
 }
 
 
-def _lang_color(name: str) -> str:
-    return LANG_COLOR_MAP.get(name.lower(), COLORS["other"])
+@dataclass
+class Tweaks:
+    """Visual knobs for the minimal layout. Defaults match the design's
+    saved tweaks block (asciiSize=9, fontSize=17, gap=60, showRule=false,
+    showPalette=false, showStatusBar=false)."""
+
+    ascii_size: int = 9
+    ascii_color: str = "#8b95a3"
+    accent: str = "#b6e04f"
+    font_size: int = 17
+    gap: int = 60
+    show_stats: bool = True
+    show_languages: bool = True
+    show_now: bool = True
+    show_palette: bool = False
+    show_statusbar: bool = False
+    show_rule: bool = False
+
+    @classmethod
+    def from_config(cls, config: dict) -> "Tweaks":
+        raw = config.get("tweaks") or {}
+        valid = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in raw.items() if k in valid})
 
 
-def render_languages_panel(
-    languages: list[tuple[str, float]],
-    x: int,
-    y: int,
-    w: int,
-    h: int,
-    *,
-    bar_height: int = 14,
-) -> str:
-    frame = render_panel_frame(x, y, w, h, "languages", "last 12mo")
-
-    body_x = x + 22
-    body_w = w - 44
-    name_w = 88
-    pct_w = 44
-    gap = 14
-    bar_x = body_x + name_w + gap
-    bar_w = body_w - name_w - pct_w - 2 * gap
-    pct_x = body_x + body_w
-
-    rows_top = y + 56
-    rows_bottom = y + h - 24
-    row_count = max(len(languages), 1)
-    row_h = (rows_bottom - rows_top) / row_count
-
-    out = [frame]
-    half_bar = bar_height / 2
-    for i, (name, pct) in enumerate(languages):
-        cy = rows_top + i * row_h + row_h / 2
-        text_y = cy + 5
-        bar_y = cy - half_bar
-        color = _lang_color(name)
-        fill_w = max(0, int(bar_w * (pct / 100)))
-        out.append(
-            f'<text x="{body_x}" y="{text_y}" fill="{COLORS["text"]}" font-size="13" '
-            f'font-family=\'{FONT_STACK}\'>{name}</text>'
-        )
-        out.append(
-            f'<rect x="{bar_x}" y="{bar_y}" width="{bar_w}" height="{bar_height}" rx="3" ry="3" '
-            f'fill="rgba(255,255,255,0.03)"/>'
-        )
-        out.append(
-            f'<rect x="{bar_x}" y="{bar_y}" width="{bar_w}" height="{bar_height}" rx="3" ry="3" '
-            f'fill="{color}" fill-opacity="0.22" mask="url(#hatch-mask)"/>'
-        )
-        out.append(
-            f'<rect x="{bar_x}" y="{bar_y}" width="{fill_w}" height="{bar_height}" rx="3" ry="3" '
-            f'fill="{color}"/>'
-        )
-        out.append(
-            f'<text x="{pct_x}" y="{text_y}" text-anchor="end" fill="{COLORS["text_dim"]}" '
-            f'font-size="13" font-family=\'{FONT_STACK}\' font-variant-numeric="tabular-nums">'
-            f'{int(round(pct))}%</text>'
-        )
-
-    return "".join(out)
-
-
-def render_activity_panel(
-    activity: list[int],
-    peak: int,
-    streak_days: int,
-    avg: float,
-    x: int,
-    y: int,
-    w: int,
-    h: int,
-) -> str:
-    frame = render_panel_frame(x, y, w, h, "activity", f"peak {peak}/day · streak {streak_days}d")
-
-    body_x = x + 22
-    body_w = w - 44
-    sub_y = y + 60
-    chart_top = y + 80
-    chart_bottom = y + h - 48
-    chart_h = chart_bottom - chart_top
-    axis_y = chart_bottom + 18
-
-    # Sub-row: "commits/day · last 60 days" green | "avg 14.3" muted
-    sub = (
-        f'<text x="{body_x}" y="{sub_y}" fill="{COLORS["green"]}" font-size="13" '
-        f'font-family=\'{FONT_STACK}\'>commits/day · last 60 days</text>'
-        f'<text x="{x + w - 22}" y="{sub_y}" text-anchor="end" fill="{COLORS["muted"]}" '
-        f'font-size="11.5" font-family=\'{FONT_STACK}\' letter-spacing="1.1">avg {avg:.1f}</text>'
+def _escape_xml(s: str) -> str:
+    return (
+        s.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
     )
 
-    # Bars
-    n = max(len(activity), 1)
-    gap = 4
-    bar_w = (body_w - gap * (n - 1)) / n
-    max_v = max(activity) if activity else 1
-    bars = []
-    for i, v in enumerate(activity):
-        pct = max(0.10, v / max_v)  # min 10% so empty days still register
-        bh = chart_h * pct
-        bx = body_x + i * (bar_w + gap)
-        by = chart_bottom - bh
-        bars.append(
-            f'<rect class="bar-bar" x="{bx:.2f}" y="{by:.2f}" width="{bar_w:.2f}" '
-            f'height="{bh:.2f}" rx="2" ry="2" fill="{COLORS["green"]}"/>'
-        )
 
-    # Axis line + labels
-    labels_y = axis_y + 10
-    axis_line = (
-        f'<line x1="{body_x}" y1="{axis_y}" x2="{x + w - 22}" y2="{axis_y}" '
-        f'stroke="rgba(148,163,184,0.08)" stroke-width="1" stroke-dasharray="3 3"/>'
-    )
-    label_positions = [
-        (body_x, "60d", "start"),
-        (body_x + body_w * 0.25, "45d", "middle"),
-        (body_x + body_w * 0.50, "30d", "middle"),
-        (body_x + body_w * 0.75, "15d", "middle"),
-        (body_x + body_w, "today", "end"),
-    ]
-    labels = "".join(
-        f'<text x="{lx:.2f}" y="{labels_y}" text-anchor="{anchor}" fill="{COLORS["muted_soft"]}" '
-        f'font-size="11" font-family=\'{FONT_STACK}\' letter-spacing="0.88" '
-        f'text-transform="uppercase">{txt}</text>'
-        for lx, txt, anchor in label_positions
-    )
-
-    return frame + sub + "".join(bars) + axis_line + labels
+def _format_uptime(uptime_from: str, today: date) -> str:
+    start = date.fromisoformat(uptime_from)
+    delta_days = (today - start).days
+    return f"{delta_days // 365}y {delta_days % 365}d"
 
 
 def format_compact(n: int) -> str:
@@ -402,239 +131,335 @@ def format_loc(total_bytes: int) -> str:
     return f"{lines // 1000}k"
 
 
-def render_stats_panel(stats: dict, x: int, y: int, w: int, h: int) -> str:
-    frame = render_panel_frame(x, y, w, h, "stats", "● LIVE")
-
-    body_x = x + 22
-    body_w = w - 44
-    row_y = y + 60
-    row_h = 26
-
-    rows = [
-        ("repos", str(stats["repos"]), False),
-        ("stars", str(stats["stars"]), True),
-        ("followers", str(stats["followers"]), False),
-        ("commits", format_compact(stats["commits"]), False),
-        ("loc", format_loc(stats["loc_bytes"]), False),
-    ]
-
-    out = [frame]
-    for i, (k, v, has_star) in enumerate(rows):
-        ry = row_y + i * row_h
-        v_text = v + (f'<tspan fill="{COLORS["orange"]}" dx="6">★</tspan>' if has_star else "")
-        out.append(
-            f'<text x="{body_x}" y="{ry}" fill="{COLORS["text"]}" font-size="13" '
-            f'font-family=\'{FONT_STACK}\'>{k}</text>'
-        )
-        out.append(
-            f'<text x="{body_x + body_w}" y="{ry}" text-anchor="end" fill="{COLORS["text"]}" '
-            f'font-size="13" font-family=\'{FONT_STACK}\' font-variant-numeric="tabular-nums">'
-            f'{v_text}</text>'
-        )
-        if i < len(rows) - 1:
-            out.append(
-                f'<line x1="{body_x}" y1="{ry + 8}" x2="{body_x + body_w}" y2="{ry + 8}" '
-                f'stroke="rgba(148,163,184,0.06)" stroke-width="1" stroke-dasharray="1 4"/>'
-            )
-
-    # Top repos header
-    top_head_y = row_y + len(rows) * row_h + 18
-    out.append(
-        f'<line x1="{body_x}" y1="{top_head_y - 14}" x2="{body_x + body_w}" y2="{top_head_y - 14}" '
-        f'stroke="rgba(148,163,184,0.10)" stroke-width="1" stroke-dasharray="3 3"/>'
-    )
-    out.append(
-        f'<text x="{body_x}" y="{top_head_y}" fill="{COLORS["muted"]}" font-size="11.5" '
-        f'font-family=\'{FONT_STACK}\' letter-spacing="1.6" text-transform="uppercase">top repos</text>'
-    )
-    out.append(
-        f'<text x="{body_x + body_w}" y="{top_head_y}" text-anchor="end" fill="{COLORS["muted_soft"]}" '
-        f'font-size="11.5" font-family=\'{FONT_STACK}\' font-weight="500" letter-spacing="1.4" '
-        f'text-transform="uppercase">by ★</text>'
-    )
-
-    # Top repo rows
-    for i, repo in enumerate(stats["top_repos"][:3]):
-        ry = top_head_y + 22 + i * 22
-        out.append(
-            f'<text x="{body_x}" y="{ry}" fill="{COLORS["text"]}" font-size="13" '
-            f'font-family=\'{FONT_STACK}\'>{_escape_xml(repo["name"])}</text>'
-        )
-        out.append(
-            f'<text x="{body_x + body_w - 80}" y="{ry}" text-anchor="end" '
-            f'fill="{COLORS["text_dim"]}" font-size="12" font-family=\'{FONT_STACK}\'>'
-            f'{_escape_xml(repo["language"])}</text>'
-        )
-        out.append(
-            f'<text x="{body_x + body_w}" y="{ry}" text-anchor="end" fill="{COLORS["orange"]}" '
-            f'font-size="13" font-family=\'{FONT_STACK}\' font-variant-numeric="tabular-nums">'
-            f'★ {repo["stars"]}</text>'
-        )
-
-    return "".join(out)
+def _lang_color(name: str, accent: str | None = None) -> str:
+    """Look up a color for a language name (case-insensitive).
+    `accent` overrides the 'go' default so swapping accent recolors
+    the green dot consistently."""
+    n = name.lower()
+    if n == "go" and accent:
+        return accent
+    if n == "other":
+        return COLORS["muted"]
+    return LANG_DOT_COLORS.get(n, COLORS["muted"])
 
 
-def render_now_panel(
-    cfg: dict, x: int, y: int, w: int, h: int, *, show_second_col: bool = True
+def _top_three_plus_other(
+    languages: list[tuple[str, float]],
+) -> list[tuple[str, float]]:
+    """Roll everything past the top 3 into 'other'."""
+    top = languages[:3]
+    rest_pct = sum(p for _, p in languages[3:])
+    if rest_pct > 0:
+        top.append(("other", rest_pct))
+    return top
+
+
+def render(
+    config: dict,
+    data: dict,
+    timestamp,
+    tweaks: "Tweaks | None" = None,
 ) -> str:
-    frame = render_panel_frame(x, y, w, h, "now", "/etc/8enji.conf")
-
-    body_x = x + 22
-    body_w = w - 44
-    col_gap = 40
-    col_w = (body_w - col_gap) // 2 if show_second_col else body_w
-    col1_x = body_x
-    col2_x = body_x + col_w + col_gap
-    key_w = 110
-
-    now = cfg["now"]
-    row_y_top = y + 70
-    row_h = 30
-
-    # Row 1: building (col1) | learning (col2 if shown)
-    # Row 2: listening (col1) | reach (col2 if shown)
-    rows_top = [(col1_x, "building", now["building"])]
-    rows_bot = [(col1_x, "listening", now["listening"])]
-    if show_second_col:
-        rows_top.append((col2_x, "learning", now["learning"]))
-        rows_bot.append((col2_x, "reach", now["reach"]))
-
-    out = [frame]
-    for cx, k, v in rows_top:
-        out.append(
-            f'<text x="{cx}" y="{row_y_top}" fill="{COLORS["purple"]}" font-size="14" '
-            f'font-family=\'{FONT_STACK}\'>{k}</text>'
-        )
-        out.append(
-            f'<text x="{cx + key_w}" y="{row_y_top}" fill="{COLORS["text"]}" font-size="14" '
-            f'font-family=\'{FONT_STACK}\'>{_escape_xml(v)}</text>'
-        )
-
-    divider_cols = (col1_x, col2_x) if show_second_col else (col1_x,)
-    for cx in divider_cols:
-        out.append(
-            f'<line x1="{cx}" y1="{row_y_top + 12}" x2="{cx + col_w}" y2="{row_y_top + 12}" '
-            f'stroke="rgba(148,163,184,0.06)" stroke-width="1" stroke-dasharray="1 4"/>'
-        )
-
-    ry = row_y_top + row_h
-    for cx, k, v in rows_bot:
-        out.append(
-            f'<text x="{cx}" y="{ry}" fill="{COLORS["purple"]}" font-size="14" '
-            f'font-family=\'{FONT_STACK}\'>{k}</text>'
-        )
-        out.append(
-            f'<text x="{cx + key_w}" y="{ry}" fill="{COLORS["text"]}" font-size="14" '
-            f'font-family=\'{FONT_STACK}\'>{_escape_xml(v)}</text>'
-        )
-
-    return "".join(out)
-
-
-def render_defs() -> str:
-    """SVG <defs> block: shared patterns/masks. Referenced by panels."""
-    return """<defs>
-  <pattern id="hatch" width="12" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(135)">
-    <line x1="0" y1="0" x2="0" y2="12" stroke="white" stroke-width="6"/>
-  </pattern>
-  <mask id="hatch-mask">
-    <rect x="0" y="0" width="100%" height="100%" fill="url(#hatch)"/>
-  </mask>
-</defs>"""
-
-
-CANVAS_H = 1024
-
-
-def render(config: dict, data: dict, timestamp, tweaks: Tweaks | None = None) -> str:
-    """Render the full dashboard SVG document.
-
-    `timestamp` is a datetime; we use its UTC time and date.
-    `tweaks` lets the preview tool override visual params. When None,
-    falls back to `config['tweaks']` if present, else defaults.
-    """
+    """Render the full minimal dashboard SVG."""
     if tweaks is None:
         tweaks = Tweaks.from_config(config)
 
     today = timestamp.date()
-    clock = timestamp.strftime("%H:%M:%S")
 
-    pad = CANVAS_PADDING
-    grid_top = TITLEBAR_H + pad
-    col1_x = pad
-    col1_w = 678
-    col2_x = col1_x + col1_w + pad
-    col2_w = 780
+    colors = dict(COLORS)
+    colors["green"] = tweaks.accent
 
-    row1_h = 426
-    row1_y = grid_top
-    row2_h = 354
-    row2_y = row1_y + row1_h + pad
-    row3_h = 106
-    row3_y = row2_y + row2_h + pad
-    full_w = col1_w + pad + col2_w
+    fs = tweaks.font_size
 
-    statusbar_y = row3_y + row3_h + pad
+    # ASCII column dimensions
+    ascii_lines = config["ascii_art"].rstrip("\n").split("\n")
+    max_line_len = max((len(l) for l in ascii_lines), default=0)
+    ascii_w = int(max_line_len * tweaks.ascii_size * MONO_CHAR_W)
+    ascii_line_h = tweaks.ascii_size  # line-height: 1 per design
+    ascii_h = len(ascii_lines) * ascii_line_h
 
-    me = render_me_panel(
-        config, col1_x, row1_y, col1_w, row1_h, today,
-        ascii_size=tweaks.ascii_size,
-        show_sysinfo=tweaks.show_sysinfo,
+    # Layout
+    body_x = PADDING_X
+    body_y = TITLEBAR_H + PADDING_TOP
+    info_x = body_x + ascii_w + tweaks.gap
+
+    parts: list[str] = []
+    info_y = body_y  # tracks the top edge of the next section in the info column
+
+    # ── prompt: "8enji@dashboard" ────────────────────────────────
+    prompt_fs = fs * 1.14
+    baseline = info_y + prompt_fs
+    parts.append(
+        f'<text x="{info_x}" y="{baseline:.1f}" font-family=\'{FONT_STACK}\' '
+        f'font-size="{prompt_fs:.2f}" fill="{colors["green"]}">'
+        f'<tspan font-weight="500" fill="{colors["text"]}">'
+        f'{_escape_xml(config["handle"])}</tspan>'
+        f'<tspan fill="{colors["text_dim"]}">@</tspan>'
+        f'<tspan font-weight="500" fill="{colors["text"]}">'
+        f'{_escape_xml(config["machine"])}</tspan>'
+        f"</text>"
     )
-    langs = render_languages_panel(
-        [tuple(l) for l in data["languages"]], col2_x, row1_y, col2_w, row1_h,
-        bar_height=tweaks.bar_height,
-    )
-    activity = render_activity_panel(
-        data["activity"], data["activity_peak"], data["activity_streak"],
-        data["activity_avg"], col1_x, row2_y, col1_w, row2_h,
-    )
-    stats_dict = {
-        "repos": data["public_repos"],
-        "stars": data["total_stars"],
-        "followers": data["followers"],
-        "commits": data["total_commits"],
-        "loc_bytes": data["total_loc_bytes"],
-        "top_repos": data["top_repos"],
-    }
-    stats = render_stats_panel(stats_dict, col2_x, row2_y, col2_w, row2_h)
-    now = render_now_panel(
-        config, col1_x, row3_y, full_w, row3_h,
-        show_second_col=tweaks.show_second_now_col,
-    )
-    statusbar = (
-        render_statusbar(config["statusbar"], clock, statusbar_y)
-        if tweaks.show_statusbar else ""
-    )
-    chrome = render_chrome(title_left=config["handle"], title_right=config["machine"])
-    defs = render_defs()
+    info_y = int(baseline + 4)  # margin-bottom
 
-    svg = f"""<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {CANVAS_W} {CANVAS_H}"
-     width="{CANVAS_W}" height="{CANVAS_H}" font-family='{FONT_STACK}'>
-  <rect width="100%" height="100%" fill="{COLORS['bg_outer']}"/>
-  {defs}
-  {chrome}
-  {me}
-  {langs}
-  {activity}
-  {stats}
-  {now}
-  {statusbar}
-</svg>"""
+    # ── rule (toggleable) ────────────────────────────────────────
+    if tweaks.show_rule:
+        baseline = info_y + fs
+        parts.append(
+            f'<text x="{info_x}" y="{baseline}" font-family=\'{FONT_STACK}\' '
+            f'font-size="{fs}" fill="{colors["muted_soft"]}">'
+            f"─────────────────────────</text>"
+        )
+        info_y = int(baseline + 4)
 
-    return _apply_tweaks(svg, tweaks)
+    info_y += 10  # spacer after prompt block
 
+    # ── kv block: os / host / shell / editor / wm / theme / uptime
+    me = config["me"]
+    kv_rows = [
+        ("os", me["os"]),
+        ("host", config["website"]),
+        ("shell", me["shell"]),
+        ("editor", me["editor"]),
+        ("wm", me["wm"]),
+        ("theme", me["theme"]),
+        ("uptime", _format_uptime(me["uptime_from"], today)),
+    ]
+    kv_col_w = int(fs * 5.5)  # ~96px at font_size 17
+    kv_key_x = info_x
+    kv_val_x = info_x + kv_col_w + 18
+    kv_line_h = fs + 4
+    parts.append(
+        _render_kv_block(kv_rows, kv_key_x, kv_val_x, info_y, fs, kv_line_h, colors)
+    )
+    info_y += len(kv_rows) * kv_line_h + 22
 
-def _apply_tweaks(svg: str, tweaks: Tweaks) -> str:
-    """Post-process the SVG string for tweaks that aren't easy to thread through
-    every renderer: accent color and global font scaling."""
-    default_accent = "#b6e04f"
-    if tweaks.accent.lower() != default_accent:
-        svg = svg.replace(default_accent, tweaks.accent)
-        svg = svg.replace(default_accent.upper(), tweaks.accent)
-    if tweaks.font_scale != 1.0:
-        def scale(m: re.Match) -> str:
-            return f'font-size="{float(m.group(1)) * tweaks.font_scale:g}"'
-        svg = re.sub(r'font-size="([\d.]+)"', scale, svg)
+    # ── stats (toggleable) ──────────────────────────────────────
+    if tweaks.show_stats:
+        info_y = _render_section_title(parts, "stats", info_x, info_y, fs, colors)
+        stat_pairs = [
+            [("repos", str(data["public_repos"])),
+             ("commits", format_compact(data["total_commits"]))],
+            [("stars", _stars_with_glyph(data["total_stars"], colors)),
+             ("streak", f'{data["activity_streak"]}d')],
+            [("followers", str(data["followers"])),
+             ("loc", format_loc(data["total_loc_bytes"]))],
+        ]
+        col_count = 2
+        info_w = CANVAS_W - info_x - PADDING_X
+        col_gap = 32
+        col_w = (info_w - col_gap * (col_count - 1)) // col_count
+        row_h = fs + 6
+        for row_idx, pair in enumerate(stat_pairs):
+            row_y = info_y + fs + row_idx * row_h
+            for col_idx, (k, v_text) in enumerate(pair):
+                x = info_x + col_idx * (col_w + col_gap)
+                parts.append(
+                    f'<text x="{x}" y="{row_y}" font-family=\'{FONT_STACK}\' '
+                    f'font-size="{fs}" fill="{colors["text_dim"]}">{_escape_xml(k)}</text>'
+                )
+                parts.append(
+                    f'<text x="{x + col_w}" y="{row_y}" font-family=\'{FONT_STACK}\' '
+                    f'font-size="{fs}" fill="{colors["text"]}" text-anchor="end" '
+                    f'font-variant-numeric="tabular-nums">{v_text}</text>'
+                )
+                parts.append(
+                    f'<line x1="{x}" y1="{row_y + 4}" x2="{x + col_w}" y2="{row_y + 4}" '
+                    f'stroke="rgba(148,163,184,0.07)" stroke-width="1" stroke-dasharray="1 3"/>'
+                )
+        info_y += len(stat_pairs) * row_h + 18
+
+    # ── languages (toggleable, top 3 + other) ───────────────────
+    if tweaks.show_languages:
+        info_y = _render_section_title(
+            parts, "languages · last 12mo", info_x, info_y, fs, colors
+        )
+        all_langs = [tuple(l) for l in data["languages"]]
+        langs = _top_three_plus_other(all_langs)
+        lang_fs = fs * 0.93
+        baseline = info_y + lang_fs
+        dot_size = 10
+        gap_between = 22
+        x = info_x
+        for name, pct in langs:
+            color = _lang_color(name, accent=tweaks.accent)
+            parts.append(
+                f'<rect x="{x:.1f}" y="{baseline - lang_fs * 0.85:.1f}" '
+                f'width="{dot_size}" height="{dot_size}" rx="2" fill="{color}"/>'
+            )
+            label = f"{name} {int(round(pct))}%"
+            label_x = x + dot_size + 8
+            parts.append(
+                f'<text x="{label_x:.1f}" y="{baseline:.1f}" font-family=\'{FONT_STACK}\' '
+                f'font-size="{lang_fs:.2f}" fill="{colors["text"]}">'
+                f'{_escape_xml(name)} '
+                f'<tspan fill="{colors["text_dim"]}">{int(round(pct))}%</tspan></text>'
+            )
+            label_w = len(label) * lang_fs * MONO_CHAR_W + dot_size + 8
+            x += label_w + gap_between
+        info_y = int(baseline + 18)
+
+    # ── now (toggleable) ────────────────────────────────────────
+    if tweaks.show_now:
+        info_y = _render_section_title(parts, "now", info_x, info_y, fs, colors)
+        now = config["now"]
+        now_rows = [
+            ("building", now["building"]),
+            ("learning", now["learning"]),
+            ("listening", now["listening"]),
+            ("reach", now["reach"]),
+        ]
+        parts.append(
+            _render_kv_block(
+                now_rows, kv_key_x, kv_val_x, info_y, fs, kv_line_h, colors
+            )
+        )
+        info_y += len(now_rows) * kv_line_h + 18
+
+    # ── palette (toggleable, off by default) ────────────────────
+    if tweaks.show_palette:
+        sw_w, sw_h = 28, 14
+        palette_seq = [
+            colors["palette_bg"],
+            colors["pink"],
+            colors["green"],
+            colors["orange"],
+            colors["ts"],
+            colors["purple"],
+            colors["cyan"],
+            colors["text"],
+        ]
+        for i, c in enumerate(palette_seq):
+            parts.append(
+                f'<rect x="{info_x + i * sw_w}" y="{info_y}" '
+                f'width="{sw_w}" height="{sw_h}" fill="{c}"/>'
+            )
+        info_y += sw_h + 12
+
+    # ── ASCII portrait (left column) ────────────────────────────
+    ascii_tspans = "".join(
+        f'<tspan x="{body_x}" y="{body_y + (i + 1) * ascii_line_h}">'
+        f"{_escape_xml(line)}</tspan>"
+        for i, line in enumerate(ascii_lines)
+    )
+    ascii_block = (
+        f"<text font-family='{FONT_STACK}' "
+        f'font-size="{tweaks.ascii_size}" fill="{tweaks.ascii_color}" '
+        f'xml:space="preserve" font-weight="500">{ascii_tspans}</text>'
+    )
+
+    # ── canvas height ───────────────────────────────────────────
+    content_bottom = max(info_y, body_y + ascii_h)
+    canvas_h = content_bottom + PADDING_BOTTOM
+    if tweaks.show_statusbar:
+        canvas_h += STATUSBAR_H
+
+    chrome = _render_chrome(
+        title=f'{_escape_xml(config["handle"])} — -zsh — 96×32',
+        canvas_h=canvas_h,
+    )
+    statusbar = ""
+    if tweaks.show_statusbar:
+        statusbar = _render_statusbar(
+            y=canvas_h - STATUSBAR_H,
+            version=config.get("statusbar", {}).get("version", "v2.6.0"),
+            handle=config["handle"],
+            colors=colors,
+        )
+
+    svg = (
+        f'<?xml version="1.0" encoding="UTF-8"?>\n'
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'viewBox="0 0 {CANVAS_W} {canvas_h}" '
+        f'width="{CANVAS_W}" height="{canvas_h}" '
+        f"font-family='{FONT_STACK}'>"
+        f'<rect width="100%" height="100%" fill="{colors["bg_outer"]}"/>'
+        f"{chrome}"
+        f"{ascii_block}"
+        f"{''.join(parts)}"
+        f"{statusbar}"
+        f"</svg>"
+    )
     return svg
+
+
+def _stars_with_glyph(n: int, colors: dict) -> str:
+    """Render a star count with the orange '★' tspan appended."""
+    return f'{n} <tspan fill="{colors["orange"]}">★</tspan>'
+
+
+def _render_section_title(
+    parts: list[str], label: str, x: int, y: int, fs: int, colors: dict
+) -> int:
+    """Emit a small uppercase section title and return the next y."""
+    title_fs = fs * 0.82
+    baseline = y + title_fs
+    parts.append(
+        f'<text x="{x}" y="{baseline:.1f}" font-family=\'{FONT_STACK}\' '
+        f'font-size="{title_fs:.2f}" fill="{colors["muted"]}" font-weight="600" '
+        f'letter-spacing="{title_fs * 0.16:.2f}" '
+        f'text-transform="uppercase">{_escape_xml(label)}</text>'
+    )
+    return int(baseline + 10)
+
+
+def _render_kv_block(
+    rows: list[tuple[str, str]],
+    key_x: int,
+    val_x: int,
+    start_y: int,
+    fs: int,
+    line_h: int,
+    colors: dict,
+) -> str:
+    """Render a key/value grid with purple keys and light values."""
+    out = []
+    for i, (k, v) in enumerate(rows):
+        row_y = start_y + fs + i * line_h
+        out.append(
+            f'<text x="{key_x}" y="{row_y}" font-family=\'{FONT_STACK}\' '
+            f'font-size="{fs}" fill="{colors["purple"]}">{_escape_xml(k)}</text>'
+        )
+        out.append(
+            f'<text x="{val_x}" y="{row_y}" font-family=\'{FONT_STACK}\' '
+            f'font-size="{fs}" fill="{colors["text"]}">{_escape_xml(v)}</text>'
+        )
+    return "".join(out)
+
+
+def _render_chrome(title: str, canvas_h: int) -> str:
+    """Window border + titlebar (traffic lights + centered title)."""
+    return (
+        f'<g class="chrome">'
+        f'<rect x="0" y="0" width="{CANVAS_W}" height="{canvas_h}" '
+        f'rx="14" ry="14" fill="{COLORS["bg"]}" '
+        f'stroke="rgba(255,255,255,0.06)" stroke-width="1"/>'
+        f'<line x1="0" y1="{TITLEBAR_H}" x2="{CANVAS_W}" y2="{TITLEBAR_H}" '
+        f'stroke="rgba(255,255,255,0.05)" stroke-width="1"/>'
+        f'<circle cx="26" cy="{TITLEBAR_H // 2}" r="6" fill="#ff5f57"/>'
+        f'<circle cx="46" cy="{TITLEBAR_H // 2}" r="6" fill="#febc2e"/>'
+        f'<circle cx="66" cy="{TITLEBAR_H // 2}" r="6" fill="#28c840"/>'
+        f'<text x="{CANVAS_W // 2}" y="{TITLEBAR_H // 2 + 5}" '
+        f'text-anchor="middle" fill="{COLORS["text_dim"]}" '
+        f'font-size="13.5" font-family=\'{FONT_STACK}\'>{title}</text>'
+        f"</g>"
+    )
+
+
+def _render_statusbar(y: int, version: str, handle: str, colors: dict) -> str:
+    text_y = y + 22
+    return (
+        f'<g class="statusbar">'
+        f'<line x1="0" y1="{y}" x2="{CANVAS_W}" y2="{y}" '
+        f'stroke="rgba(255,255,255,0.05)" stroke-width="1"/>'
+        f'<circle cx="26" cy="{text_y - 4}" r="3" fill="{colors["green"]}"/>'
+        f'<text x="40" y="{text_y}" fill="{colors["muted_soft"]}" '
+        f'font-size="11.5" font-family=\'{FONT_STACK}\' letter-spacing="1.4">ONLINE</text>'
+        f'<text x="120" y="{text_y}" fill="{colors["muted_soft"]}" '
+        f'font-size="11.5" font-family=\'{FONT_STACK}\' letter-spacing="1.4">'
+        f'{_escape_xml(version)}</text>'
+        f'<text x="{CANVAS_W - 22}" y="{text_y}" text-anchor="end" '
+        f'fill="{colors["muted_soft"]}" font-size="11.5" '
+        f"font-family='{FONT_STACK}' letter-spacing=\"1.4\">"
+        f'github.com/{_escape_xml(handle)}</text>'
+        f"</g>"
+    )
