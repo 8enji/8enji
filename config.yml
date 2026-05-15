@@ -6,16 +6,16 @@ me:
   os: macOS 15.4 · arm64
   host: bencharest.com
   shell: zsh 5.9
-  editor: nvim 0.10.2
+  editor: cursor
   theme: tokyonight-storm
-  uptime_from: '2016-09-22'
+  uptime_from: '2004-04-06'
   github_url: github.com/8enji
 
 now:
-  building: a tiny static-site engine in rust
-  learning: zig · webgpu · papermaking
-  listening: tycho — awake (vinyl rip)
-  reach: '@8enji · ben@bencharest.com'
+  building: runparallax.dev
+  learning: agentic dev · QA
+  listening: bladee · fakemink
+  reach: '@bcharest_dev · b.charest04@gmail.com'
 
 tweaks:
   ascii_size: 12
