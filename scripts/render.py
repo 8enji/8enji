@@ -112,6 +112,17 @@ def _text(
     )
 
 
+def _kv_key_width(rows: list[tuple[str, str]], fs: int, gap: int = 18) -> int:
+    """Width of the key column for a KV block, sized to fit the longest key.
+
+    Monospace char advance ≈ fs * 0.6; add `gap` so the value doesn't kiss
+    the key. Floors at 96 to keep short blocks visually consistent with the
+    design's 96px grid column.
+    """
+    max_chars = max((len(k) for k, _ in rows), default=0)
+    return max(96, int(max_chars * fs * 0.6) + gap)
+
+
 def _colorize_value(v: str) -> str:
     """Dim · separators and (parentheticals) inside KV values."""
     out = _e(v)
@@ -334,11 +345,11 @@ def render(config: Mapping[str, Any], data: Mapping[str, Any]) -> str:
         )
 
     # ── kv1 ──
-    kv_key_w = 96
+    kv1_key_w = _kv_key_width(kv1, tw.font_size)
     for i, (k, v) in enumerate(kv1):
         y = y_at(m["kv1_top"] + i * m["kv_row_h"] + tw.font_size)
         parts.append(_text(info_x, y, PURPLE, tw.font_size, _e(k)))
-        parts.append(_text(info_x + kv_key_w, y, TEXT, tw.font_size, _colorize_value(v)))
+        parts.append(_text(info_x + kv1_key_w, y, TEXT, tw.font_size, _colorize_value(v)))
 
     # ── stats ──
     if tw.show_stats and stats:
@@ -390,10 +401,11 @@ def render(config: Mapping[str, Any], data: Mapping[str, Any]) -> str:
             info_x, y_at(m["now_title_y"]),
             MUTED, m["section_fs"], _e("NOW"), weight="600",
         ))
+        now_key_w = _kv_key_width(nowkv, tw.font_size)
         for i, (k, v) in enumerate(nowkv):
             y = y_at(m["now_top"] + i * m["kv_row_h"] + tw.font_size)
             parts.append(_text(info_x, y, PURPLE, tw.font_size, _e(k)))
-            parts.append(_text(info_x + kv_key_w, y, TEXT, tw.font_size, _colorize_value(v)))
+            parts.append(_text(info_x + now_key_w, y, TEXT, tw.font_size, _colorize_value(v)))
 
     # ── palette swatches (optional) ──
     if tw.show_palette:
