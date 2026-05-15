@@ -4,7 +4,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import date, datetime, timezone
+from datetime import date
 from pathlib import Path
 
 import yaml
@@ -18,6 +18,28 @@ CONFIG_PATH = REPO_ROOT / "config.yml"
 OUTPUT_PATH = REPO_ROOT / "dashboard.svg"
 
 
+def _format_uptime(uptime_from: str, today: date) -> str:
+    start = date.fromisoformat(uptime_from)
+    delta_days = (today - start).days
+    return f"{delta_days // 365}y {delta_days % 365}d"
+
+
+def _adapt_github_data(gd: dict, uptime: str) -> dict:
+    """Translate github_data.fetch_all() output to the renderer's data shape."""
+    languages = {name: pct for name, pct in gd.get("languages", [])}
+    return {
+        "repos":     gd.get("public_repos", 0),
+        "stars":     gd.get("total_stars", 0),
+        "followers": gd.get("followers", 0),
+        "commits":   gd.get("total_commits", 0),
+        "streak":    gd.get("activity_streak", 0),
+        # Bytes → approximate LOC at ~50 bytes/line, then _humanize_loc handles the suffix.
+        "loc":       gd.get("total_loc_bytes", 0) // 50,
+        "languages": languages,
+        "uptime":    uptime,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true",
@@ -27,6 +49,7 @@ def main() -> int:
     args = parser.parse_args()
 
     config = yaml.safe_load(CONFIG_PATH.read_text())
+    today = date.today()
 
     if args.from_fixture:
         fixtures = Path(__file__).parent / "tests" / "fixtures"
@@ -36,11 +59,12 @@ def main() -> int:
         if not token:
             print("error: GITHUB_TOKEN env var required", file=sys.stderr)
             return 2
-        client = GitHubClient(token=token, user=config["handle"])
-        data = client.fetch_all(today=date.today())
+        client = GitHubClient(token=token, user=config["me"]["handle"])
+        gd = client.fetch_all(today=today)
+        uptime = _format_uptime(config["me"]["uptime_from"], today)
+        data = _adapt_github_data(gd, uptime)
 
-    timestamp = datetime.now(timezone.utc)
-    svg = render(config, data, timestamp)
+    svg = render(config, data)
 
     if args.dry_run:
         sys.stdout.write(svg)

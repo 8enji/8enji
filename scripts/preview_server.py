@@ -10,8 +10,8 @@ YAML block from the side panel into config.yml when you're happy.
 
 import argparse
 import json
+from copy import deepcopy
 from dataclasses import fields
-from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -75,15 +75,18 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 self._send(200, TEMPLATE_PATH.read_text(), "text/html")
                 return
             if url.path == "/api/tweaks":
-                t = Tweaks.from_config(_load_config())
+                t = Tweaks.from_config(_load_config().get("tweaks"))
                 self._send(200, json.dumps(_tweaks_to_dict(t)), "application/json")
                 return
             if url.path == "/render.svg":
                 config = _load_config()
                 data = _load_data()
-                tweaks = Tweaks.from_config(config)
+                tweaks = Tweaks.from_config(config.get("tweaks"))
                 tweaks = _override_from_qs(tweaks, parse_qs(url.query))
-                svg = render(config, data, datetime.now(timezone.utc), tweaks=tweaks)
+                # render() reads tweaks from config["tweaks"], so splice the overrides in
+                preview_config = deepcopy(config)
+                preview_config["tweaks"] = _tweaks_to_dict(tweaks)
+                svg = render(preview_config, data)
                 self._send(200, svg, "image/svg+xml")
                 return
             self._send(404, "not found", "text/plain")

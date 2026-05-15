@@ -1,99 +1,66 @@
-"""SVG renderer for the 8enji minimal dashboard (neofetch-style).
-
-Pure functions: no I/O, no global state. Mirrors the design at
-readme/project/readme-minimal.html in the design handoff — ASCII
-portrait on the left, structured info column on the right.
 """
+scripts/render.py — pure SVG renderer for the 8enji dashboard.
+
+No I/O, no network. Takes a parsed config + a fetched GitHub data dict and
+returns an SVG string ready to be written to dashboard.svg.
+
+The output mirrors readme-minimal.html: a macOS-terminal-shaped window with
+an ASCII portrait on the left and a neofetch-style info column on the right.
+"""
+
+from __future__ import annotations
 
 import re
 from dataclasses import dataclass, fields
-from datetime import date
+from html import escape
+from typing import Any, Mapping
 
+# ── canvas ───────────────────────────────────────────────────────────────
+CANVAS_W = 1280  # fixed; matches readme-minimal.html .window width
 
-CANVAS_W = 1280
-TITLEBAR_H = 40
-STATUSBAR_H = 36
+# ── palette ──────────────────────────────────────────────────────────────
+BG          = "#12161e"
+BORDER      = "rgba(255,255,255,0.06)"
+TITLE_LINE  = "rgba(255,255,255,0.05)"
+TEXT        = "#cdd6e1"
+TEXT_DIM    = "#8b95a3"
+MUTED       = "#5a6473"
+MUTED_SOFT  = "#3f4753"
+GREEN       = "#b6e04f"
+PURPLE      = "#c8a2ff"
+ORANGE      = "#f1c47a"
+PINK        = "#ee557d"
 
-
-COLORS = {
-    "bg_outer": "#07090d",
-    "bg": "#0e1218",
-    "text": "#cdd6e1",
-    "text_dim": "#8b95a3",
-    "muted": "#5a6473",
-    "muted_soft": "#3f4753",
-    "green": "#b6e04f",
-    "purple": "#c8a2ff",
-    "orange": "#f1c47a",
-    "pink": "#ee557d",
-    "ts": "#5fb7ff",
-    "rust": "#f1c47a",
-    "lua": "#ee557d",
-    "cyan": "#5fd9c8",
-    "palette_bg": "#1a1f29",
+LANG_DOT_COLORS: dict[str, str] = {
+    "typescript": "#5fb7ff",
+    "javascript": "#5fb7ff",
+    "python":     "#c8a2ff",
+    "go":         "#b6e04f",
+    "rust":       "#f1c47a",
+    "lua":        "#ee557d",
+    "c":          "#cdd6e1",
+    "c++":        "#cdd6e1",
+    "shell":      "#b6e04f",
+    "html":       "#ee557d",
+    "css":        "#5fb7ff",
 }
+LANG_DOT_FALLBACK = MUTED
 
-FONT_STACK = '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
+MONO_STACK = (
+    "'JetBrains Mono', ui-monospace, 'SF Mono', "
+    "SFMono-Regular, Menlo, Consolas, monospace"
+)
 
-# Approximate horizontal character width as a fraction of font-size for
-# monospace. JetBrains Mono ~0.6; we use 0.55 to leave a little air.
-MONO_CHAR_W = 0.55
-
-LANG_DOT_COLORS = {
-    "typescript":  COLORS["ts"],
-    "javascript":  "#f1e05a",
-    "python":      COLORS["purple"],
-    "go":          COLORS["green"],
-    "rust":        COLORS["rust"],
-    "lua":         COLORS["lua"],
-    "java":        "#f89820",
-    "kotlin":      "#a97bff",
-    "swift":       "#ff7e3b",
-    "ruby":        "#cc342d",
-    "php":         "#787cb5",
-    "html":        "#e44d26",
-    "css":         "#5fb7ff",
-    "scss":        "#cc6699",
-    "shell":       "#89e051",
-    "bash":        "#89e051",
-    "c":           "#a8b9cc",
-    "c++":         "#f34b7d",
-    "c#":          "#9b4dca",
-    "vue":         "#41b883",
-    "svelte":      "#ff3e00",
-    "dart":        "#00b4ab",
-    "r":           "#5fb7ff",
-    "scala":       "#dc6868",
-    "haskell":     "#a78bfa",
-    "elixir":      "#a97bff",
-    "perl":        "#0fc4dc",
-    "matlab":      "#e16737",
-    "objective-c": "#438eff",
-    "sql":         "#e38c00",
-    "markdown":    COLORS["text_dim"],
-    "dockerfile":  "#0db7ed",
-    "yaml":        "#e5c07b",
-    "json":        "#cdd6e1",
-    "tex":         "#82b541",
-    "latex":       "#82b541",
-}
-
-
+# ── tweaks ───────────────────────────────────────────────────────────────
 @dataclass
 class Tweaks:
-    """Visual knobs for the minimal layout. Defaults mirror the saved
-    EDITMODE-BEGIN block from readme-minimal.html: small ascii variant at
-    12px, info font 19px, padX 88, padY 44, gap 44, optional sections off."""
-
-    ascii_variant: str = "small"
-    ascii_size_small: int = 12
-    ascii_size_large: int = 7
-    ascii_color: str = "#8b95a3"
-    accent: str = "#b6e04f"
+    ascii_size: int = 12
+    ascii_color: str = TEXT_DIM
+    accent: str = GREEN
     font_size: int = 19
+    gap: int = 44
     pad_x: int = 88
     pad_y: int = 44
-    gap: int = 44
     show_stats: bool = True
     show_languages: bool = True
     show_now: bool = True
@@ -101,435 +68,366 @@ class Tweaks:
     show_statusbar: bool = False
     show_rule: bool = False
 
-    @property
-    def ascii_size(self) -> int:
-        return self.ascii_size_small if self.ascii_variant == "small" else self.ascii_size_large
-
     @classmethod
-    def from_config(cls, config: dict) -> "Tweaks":
-        raw = config.get("tweaks") or {}
-        valid = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in raw.items() if k in valid})
+    def from_config(cls, raw: Mapping[str, Any] | None) -> "Tweaks":
+        if not raw:
+            return cls()
+        known = {f.name for f in fields(cls)}
+        cleaned = {k: v for k, v in raw.items() if k in known}
+        return cls(**cleaned)
 
 
-def _escape_xml(s: str) -> str:
+# ── helpers ──────────────────────────────────────────────────────────────
+def _e(s: Any) -> str:
+    """XML-escape."""
+    return escape(str(s), quote=True)
+
+
+def _dedent_ascii(s: str) -> str:
+    """Strip the shared left-indent so the figure sits flush at column 0."""
+    lines = s.splitlines()
+    indents = [len(l) - len(l.lstrip(" ")) for l in lines if l.strip()]
+    if not indents:
+        return s
+    n = min(indents)
+    return "\n".join(l[n:] if len(l) >= n else l for l in lines)
+
+
+def _font(size: int) -> str:
+    return f' font-size="{size}" font-family="{MONO_STACK}"'
+
+
+def _text(
+    x: float, y: float, fill: str, size: int, content: str,
+    weight: str = "", anchor: str = "",
+) -> str:
+    extra = ""
+    if weight:
+        extra += f' font-weight="{weight}"'
+    if anchor:
+        extra += f' text-anchor="{anchor}"'
     return (
-        s.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
+        f'<text x="{x:.1f}" y="{y:.1f}" fill="{fill}"'
+        f'{_font(size)}{extra}>{content}</text>'
     )
 
 
-def _format_uptime(uptime_from: str, today: date) -> str:
-    start = date.fromisoformat(uptime_from)
-    delta_days = (today - start).days
-    return f"{delta_days // 365}y {delta_days % 365}d"
+def _colorize_value(v: str) -> str:
+    """Dim · separators and (parentheticals) inside KV values."""
+    out = _e(v)
+    out = out.replace("·", f'<tspan fill="{MUTED}">·</tspan>')
+    out = re.sub(
+        r"\(([^)]+)\)",
+        lambda m: f'<tspan fill="{MUTED}">({_e(m.group(1))})</tspan>',
+        out,
+    )
+    return out
 
 
-def format_compact(n: int) -> str:
-    return f"{n:,}"
+# ── height estimation (mirrors info column layout) ───────────────────────
+def _estimate_info_height(
+    tw: Tweaks, kv_rows: int, stat_rows: int, now_rows: int,
+) -> dict[str, float | int | None]:
+    """Returns y-offsets for each block relative to the info-column top."""
+    fs = tw.font_size
+    prompt_fs  = round(fs * 1.14)
+    section_fs = round(fs * 0.82)
+    lang_fs    = round(fs * 0.93)
+    kv_row_h   = fs + 4
+    stat_row_h = fs + 7
+    block_gap  = 22
+
+    y = 0.0
+    prompt_baseline = y + prompt_fs
+    y += prompt_fs + 4
+
+    rule_y: float | None = None
+    if tw.show_rule:
+        rule_y = y + section_fs * 0.5
+        y += section_fs + 12
+
+    kv1_top = y
+    y += kv_rows * kv_row_h + block_gap
+
+    stats_title_y = stats_top = None
+    if tw.show_stats and stat_rows:
+        stats_title_y = y + section_fs
+        y += section_fs + 10
+        stats_top = y
+        rows = -(-stat_rows // 2)  # ceil
+        y += rows * stat_row_h + block_gap
+
+    langs_title_y = langs_row_y = None
+    if tw.show_languages:
+        langs_title_y = y + section_fs
+        y += section_fs + 10
+        langs_row_y = y + lang_fs
+        y += lang_fs + 6 + block_gap
+
+    now_title_y = now_top = None
+    if tw.show_now and now_rows:
+        now_title_y = y + section_fs
+        y += section_fs + 10
+        now_top = y
+        y += now_rows * kv_row_h
+
+    return dict(
+        prompt_fs=prompt_fs, section_fs=section_fs, lang_fs=lang_fs,
+        kv_row_h=kv_row_h, stat_row_h=stat_row_h,
+        prompt_baseline=prompt_baseline,
+        rule_y=rule_y,
+        kv1_top=kv1_top,
+        stats_title_y=stats_title_y, stats_top=stats_top,
+        langs_title_y=langs_title_y, langs_row_y=langs_row_y,
+        now_title_y=now_title_y, now_top=now_top,
+        total_height=y,
+    )
 
 
-def format_loc(total_bytes: int) -> str:
-    lines = total_bytes // 50
-    return f"{lines // 1000}k"
+# ── data assembly ────────────────────────────────────────────────────────
+def _humanize_loc(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}m"
+    if n >= 1_000:
+        return f"{n / 1_000:.0f}k"
+    return str(n)
 
 
-def _lang_color(name: str, accent: str | None = None) -> str:
-    """Look up a color for a language name (case-insensitive).
-    `accent` overrides the 'go' default so swapping accent recolors
-    the green dot consistently."""
-    n = name.lower()
-    if n == "go" and accent:
-        return accent
-    if n == "other":
-        return COLORS["muted"]
-    return LANG_DOT_COLORS.get(n, COLORS["muted"])
+def _build_kv1(config: Mapping[str, Any], data: Mapping[str, Any]) -> list[tuple[str, str]]:
+    me = config.get("me", {})
+    rows: list[tuple[str, str]] = []
+    for key in ("os", "host", "shell", "editor", "theme"):
+        if key in me:
+            rows.append((key, str(me[key])))
+    if "uptime" in data:
+        rows.append(("uptime", str(data["uptime"])))
+    return rows
 
 
-def _top_three_plus_other(
-    languages: list[tuple[str, float]],
-) -> list[tuple[str, float]]:
-    """Roll everything past the top 3 into 'other'."""
-    top = languages[:3]
-    rest_pct = sum(p for _, p in languages[3:])
-    if rest_pct > 0:
-        top.append(("other", rest_pct))
-    return top
+def _build_stats(data: Mapping[str, Any]) -> list[tuple[str, str]]:
+    return [
+        ("repos",     f'{data.get("repos", 0)}'),
+        ("stars",     f'{data.get("stars", 0)} ★'),
+        ("followers", f'{data.get("followers", 0)}'),
+        ("commits",   f'{data.get("commits", 0):,}'),
+        ("streak",    f'{data.get("streak", 0)}d'),
+        ("loc",       _humanize_loc(data.get("loc", 0))),
+    ]
 
 
-def _estimate_info_height(tweaks: "Tweaks") -> int:
-    """Estimate the info column's total rendered height based on visible
-    sections, without producing any SVG. Used to size the ASCII portrait so
-    both columns share visual weight."""
-    fs = tweaks.font_size
-    kv_line_h = int(fs * 1.4)
-    stat_row_h = int(fs * 1.6)
-    h = int(fs * 1.14) + 4               # prompt baseline + margin
-    if tweaks.show_rule:
-        h += fs + 18                     # rule + margin
-    h += 10                              # spacer after prompt block
-    h += 6 * kv_line_h + 22              # 6 KV rows + margin
-    if tweaks.show_stats:
-        h += int(fs * 0.82) + 10         # section title
-        h += 3 * stat_row_h + 22         # 3 stat rows + margin
-    if tweaks.show_languages:
-        h += int(fs * 0.82) + 10
-        h += int(fs * 0.93) + 22
-    if tweaks.show_now:
-        h += int(fs * 0.82) + 10
-        h += 4 * kv_line_h + 18
-    if tweaks.show_palette:
-        h += 14 + 12
-    return h
+def _build_langs(data: Mapping[str, Any]) -> list[tuple[str, str, str]]:
+    """Top 3 + 'other'."""
+    raw = data.get("languages", {})
+    if not raw:
+        return []
+    total = sum(raw.values()) or 1
+    items = sorted(raw.items(), key=lambda kv: -kv[1])
+    top = items[:3]
+    rest = sum(v for _, v in items[3:])
+    out: list[tuple[str, str, str]] = []
+    for name, count in top:
+        pct = round(count / total * 100)
+        color = LANG_DOT_COLORS.get(name.lower(), LANG_DOT_FALLBACK)
+        out.append((name.lower(), f"{pct}%", color))
+    if rest > 0:
+        pct = round(rest / total * 100)
+        out.append(("other", f"{pct}%", LANG_DOT_FALLBACK))
+    return out
 
 
-def render(
-    config: dict,
-    data: dict,
-    timestamp,
-    tweaks: "Tweaks | None" = None,
-) -> str:
-    """Render the full minimal dashboard SVG."""
-    if tweaks is None:
-        tweaks = Tweaks.from_config(config)
+def _build_now(config: Mapping[str, Any]) -> list[tuple[str, str]]:
+    now = config.get("now", {})
+    keys = ("building", "learning", "listening", "reach")
+    return [(k, str(now[k])) for k in keys if k in now]
 
-    today = timestamp.date()
 
-    colors = dict(COLORS)
-    colors["green"] = tweaks.accent
+# ── renderer ─────────────────────────────────────────────────────────────
+def render(config: Mapping[str, Any], data: Mapping[str, Any]) -> str:
+    tw = Tweaks.from_config(config.get("tweaks"))
 
-    fs = tweaks.font_size
+    ascii_art = _dedent_ascii(config.get("ascii_art", ""))
+    ascii_lines = ascii_art.splitlines() or [""]
+    kv1   = _build_kv1(config, data)
+    stats = _build_stats(data) if tw.show_stats else []
+    langs = _build_langs(data) if tw.show_languages else []
+    nowkv = _build_now(config) if tw.show_now else []
 
-    # ASCII dimensions — variant chooses between two source blocks in config
-    ascii_key = "ascii_art_small" if tweaks.ascii_variant == "small" else "ascii_art"
-    ascii_source = config.get(ascii_key) or config["ascii_art"]
-    ascii_lines = ascii_source.rstrip("\n").split("\n")
-    max_line_len = max((len(l) for l in ascii_lines), default=0)
-    num_ascii_lines = max(len(ascii_lines), 1)
-    ascii_size = tweaks.ascii_size
-    ascii_w = int(max_line_len * ascii_size * MONO_CHAR_W)
-    ascii_line_h = ascii_size
-    ascii_h = num_ascii_lines * ascii_line_h
+    # geometry
+    title_h = 50
+    char_w  = tw.ascii_size * 0.6
+    ascii_w = max((int(len(l) * char_w) for l in ascii_lines), default=0)
+    ascii_h = len(ascii_lines) * tw.ascii_size
 
-    # Layout (pad_x / pad_y come from tweaks, matching readme-minimal.html)
-    body_x = tweaks.pad_x
-    body_y = TITLEBAR_H + tweaks.pad_y
-    info_x = body_x + ascii_w + tweaks.gap
+    info_x = tw.pad_x + ascii_w + tw.gap
+    m = _estimate_info_height(tw, len(kv1), len(stats), len(nowkv))
+    info_h = m["total_height"]
 
-    # ── Match heights between ASCII and info column ─────────────
-    # If the info column is naturally taller (typical for the small variant)
-    # we shift the ASCII down to center it against the info. If the ASCII
-    # is taller (typical for the large variant) we instead stretch the
-    # info column's inter-section gaps so both columns share visual weight.
-    base_info_h = _estimate_info_height(tweaks)
-    ascii_y_offset = 0
-    extra_per_gap = 0
-    if ascii_h > base_info_h:
-        n_stretch = 1 + 1 + sum(
-            1 for visible in (tweaks.show_stats, tweaks.show_languages,
-                              tweaks.show_now, tweaks.show_palette)
-            if visible
-        )
-        extra_per_gap = (ascii_h - base_info_h) // max(n_stretch, 1)
-    elif tweaks.ascii_variant == "small":
-        ascii_y_offset = max(0, (base_info_h - ascii_h) // 2)
+    body_h = max(ascii_h, info_h) + tw.pad_y * 2 + 4
+    canvas_h = int(title_h + body_h)
+
+    info_top  = title_h + tw.pad_y + max(0, (ascii_h - info_h) / 2)
+    ascii_top = title_h + tw.pad_y + max(0, (info_h - ascii_h) / 2)
+
+    def y_at(rel: float) -> float:
+        return info_top + rel
 
     parts: list[str] = []
-    info_y = body_y  # tracks the top edge of the next section in the info column
-
-    # ── prompt: "8enji@dashboard" ────────────────────────────────
-    prompt_fs = fs * 1.14
-    baseline = info_y + prompt_fs
     parts.append(
-        f'<text x="{info_x}" y="{baseline:.1f}" font-family=\'{FONT_STACK}\' '
-        f'font-size="{prompt_fs:.2f}" fill="{colors["green"]}">'
-        f'<tspan font-weight="500" fill="{colors["text"]}">'
-        f'{_escape_xml(config["handle"])}</tspan>'
-        f'<tspan fill="{colors["text_dim"]}">@</tspan>'
-        f'<tspan font-weight="500" fill="{colors["text"]}">'
-        f'{_escape_xml(config["machine"])}</tspan>'
-        f"</text>"
-    )
-    info_y = int(baseline + 4)  # margin-bottom
-
-    # ── rule (toggleable) ────────────────────────────────────────
-    if tweaks.show_rule:
-        baseline = info_y + fs
-        parts.append(
-            f'<text x="{info_x}" y="{baseline}" font-family=\'{FONT_STACK}\' '
-            f'font-size="{fs}" fill="{colors["muted_soft"]}">'
-            f"─────────────────────────</text>"
-        )
-        info_y = int(baseline + 18)  # rule margin-bottom
-
-    info_y += 10 + extra_per_gap  # spacer after prompt block (+stretch)
-
-    # ── kv block: os / host / shell / editor / theme / uptime ────
-    me = config["me"]
-    kv_rows = [
-        ("os", me["os"]),
-        ("host", config["website"]),
-        ("shell", me["shell"]),
-        ("editor", me["editor"]),
-        ("theme", me["theme"]),
-        ("uptime", _format_uptime(me["uptime_from"], today)),
-    ]
-    kv_col_w = 96  # fixed at 96px in the design
-    kv_key_x = info_x
-    kv_val_x = info_x + kv_col_w + 18
-    kv_line_h = int(fs * 1.4)
-    parts.append(
-        _render_kv_block(kv_rows, kv_key_x, kv_val_x, info_y, fs, kv_line_h, colors)
-    )
-    info_y += len(kv_rows) * kv_line_h + 22 + extra_per_gap
-
-    # ── stats (toggleable, 2-column grid in DOM order) ──────────
-    if tweaks.show_stats:
-        info_y = _render_section_title(parts, "stats", info_x, info_y, fs, colors)
-        # Grid order matches the HTML source: row-major fill of a 2-col grid.
-        stat_pairs = [
-            [("repos", str(data["public_repos"])),
-             ("stars", _stars_with_glyph(data["total_stars"], colors))],
-            [("followers", str(data["followers"])),
-             ("commits", format_compact(data["total_commits"]))],
-            [("streak", f'{data["activity_streak"]}d'),
-             ("loc", format_loc(data["total_loc_bytes"]))],
-        ]
-        col_count = 2
-        info_w = CANVAS_W - info_x - tweaks.pad_x
-        col_gap = 32
-        col_w = (info_w - col_gap * (col_count - 1)) // col_count
-        row_h = int(fs * 1.6)
-        for row_idx, pair in enumerate(stat_pairs):
-            row_y = info_y + fs + row_idx * row_h
-            for col_idx, (k, v_text) in enumerate(pair):
-                x = info_x + col_idx * (col_w + col_gap)
-                parts.append(
-                    f'<text x="{x}" y="{row_y}" font-family=\'{FONT_STACK}\' '
-                    f'font-size="{fs}" fill="{colors["text_dim"]}">{_escape_xml(k)}</text>'
-                )
-                parts.append(
-                    f'<text x="{x + col_w}" y="{row_y}" font-family=\'{FONT_STACK}\' '
-                    f'font-size="{fs}" fill="{colors["text"]}" text-anchor="end" '
-                    f'font-variant-numeric="tabular-nums">{v_text}</text>'
-                )
-                parts.append(
-                    f'<line x1="{x}" y1="{row_y + 6}" x2="{x + col_w}" y2="{row_y + 6}" '
-                    f'stroke="rgba(148,163,184,0.07)" stroke-width="1" stroke-dasharray="1 3"/>'
-                )
-        info_y += len(stat_pairs) * row_h + 22 + extra_per_gap
-
-    # ── languages (toggleable, top 3 + other) ───────────────────
-    if tweaks.show_languages:
-        info_y = _render_section_title(
-            parts, "languages · last 12mo", info_x, info_y, fs, colors
-        )
-        all_langs = [tuple(l) for l in data["languages"]]
-        langs = _top_three_plus_other(all_langs)
-        lang_fs = fs * 0.93
-        baseline = info_y + lang_fs
-        dot_size = 10
-        gap_between = 22
-        x = info_x
-        for name, pct in langs:
-            color = _lang_color(name, accent=tweaks.accent)
-            parts.append(
-                f'<rect x="{x:.1f}" y="{baseline - lang_fs * 0.85:.1f}" '
-                f'width="{dot_size}" height="{dot_size}" rx="2" fill="{color}"/>'
-            )
-            label = f"{name} {int(round(pct))}%"
-            label_x = x + dot_size + 8
-            parts.append(
-                f'<text x="{label_x:.1f}" y="{baseline:.1f}" font-family=\'{FONT_STACK}\' '
-                f'font-size="{lang_fs:.2f}" fill="{colors["text"]}">'
-                f'{_escape_xml(name)} '
-                f'<tspan fill="{colors["text_dim"]}">{int(round(pct))}%</tspan></text>'
-            )
-            label_w = len(label) * lang_fs * MONO_CHAR_W + dot_size + 8
-            x += label_w + gap_between
-        info_y = int(baseline + 22) + extra_per_gap
-
-    # ── now (toggleable) ────────────────────────────────────────
-    if tweaks.show_now:
-        info_y = _render_section_title(parts, "now", info_x, info_y, fs, colors)
-        now = config["now"]
-        now_rows = [
-            ("building", now["building"]),
-            ("learning", now["learning"]),
-            ("listening", now["listening"]),
-            ("reach", now["reach"]),
-        ]
-        parts.append(
-            _render_kv_block(
-                now_rows, kv_key_x, kv_val_x, info_y, fs, kv_line_h, colors
-            )
-        )
-        info_y += len(now_rows) * kv_line_h + 18 + extra_per_gap
-
-    # ── palette (toggleable, off by default) ────────────────────
-    if tweaks.show_palette:
-        sw_w, sw_h = 28, 14
-        palette_seq = [
-            colors["palette_bg"],
-            colors["pink"],
-            colors["green"],
-            colors["orange"],
-            colors["ts"],
-            colors["purple"],
-            colors["cyan"],
-            colors["text"],
-        ]
-        for i, c in enumerate(palette_seq):
-            parts.append(
-                f'<rect x="{info_x + i * sw_w}" y="{info_y}" '
-                f'width="{sw_w}" height="{sw_h}" fill="{c}"/>'
-            )
-        info_y += sw_h + 12
-
-    # ── ASCII portrait (left column, optionally centered) ───────
-    ascii_top = body_y + ascii_y_offset
-    ascii_tspans = "".join(
-        f'<tspan x="{body_x}" y="{ascii_top + (i + 1) * ascii_line_h}">'
-        f"{_escape_xml(line)}</tspan>"
-        for i, line in enumerate(ascii_lines)
-    )
-    ascii_block = (
-        f"<text font-family='{FONT_STACK}' "
-        f'font-size="{ascii_size}" fill="{tweaks.ascii_color}" '
-        f'xml:space="preserve" font-weight="500">{ascii_tspans}</text>'
-    )
-
-    # ── canvas height ───────────────────────────────────────────
-    content_bottom = max(info_y, ascii_top + ascii_h)
-    canvas_h = content_bottom + tweaks.pad_y + 4  # CSS uses padY top + (padY+4) bottom
-    if tweaks.show_statusbar:
-        canvas_h += STATUSBAR_H
-
-    chrome = _render_chrome(
-        title=f'{_escape_xml(config["handle"])} — -zsh — 96×32',
-        canvas_h=canvas_h,
-    )
-    statusbar = ""
-    if tweaks.show_statusbar:
-        statusbar = _render_statusbar(
-            y=canvas_h - STATUSBAR_H,
-            version=config.get("statusbar", {}).get("version", "v2.6.0"),
-            handle=config["handle"],
-            colors=colors,
-        )
-
-    svg = (
-        f'<?xml version="1.0" encoding="UTF-8"?>\n'
         f'<svg xmlns="http://www.w3.org/2000/svg" '
         f'viewBox="0 0 {CANVAS_W} {canvas_h}" '
         f'width="{CANVAS_W}" height="{canvas_h}" '
-        f"font-family='{FONT_STACK}'>"
-        f'<rect width="100%" height="100%" fill="{colors["bg_outer"]}"/>'
-        f"{chrome}"
-        f"{ascii_block}"
-        f"{''.join(parts)}"
-        f"{statusbar}"
-        f"</svg>"
+        f'role="img" aria-label="8enji dashboard">'
     )
-    return svg
-
-
-def _stars_with_glyph(n: int, colors: dict) -> str:
-    """Render a star count with the orange '★' tspan appended."""
-    return f'{n} <tspan fill="{colors["orange"]}">★</tspan>'
-
-
-def _render_section_title(
-    parts: list[str], label: str, x: int, y: int, fs: int, colors: dict
-) -> int:
-    """Emit a small uppercase section title and return the next y."""
-    title_fs = fs * 0.82
-    baseline = y + title_fs
     parts.append(
-        f'<text x="{x}" y="{baseline:.1f}" font-family=\'{FONT_STACK}\' '
-        f'font-size="{title_fs:.2f}" fill="{colors["muted"]}" font-weight="600" '
-        f'letter-spacing="{title_fs * 0.16:.2f}" '
-        f'text-transform="uppercase">{_escape_xml(label)}</text>'
+        '<defs>'
+        f'<clipPath id="clip"><rect x="0" y="0" width="{CANVAS_W}" '
+        f'height="{canvas_h}" rx="14" ry="14"/></clipPath>'
+        '</defs>'
+        '<g clip-path="url(#clip)">'
+        f'<rect x="0" y="0" width="{CANVAS_W}" height="{canvas_h}" fill="{BG}"/>'
     )
-    return int(baseline + 10)
 
+    # ── titlebar ──
+    parts.append(
+        f'<line x1="0" y1="{title_h}" x2="{CANVAS_W}" y2="{title_h}" stroke="{TITLE_LINE}"/>'
+        f'<circle cx="22" cy="{title_h / 2}" r="6" fill="#ff5f57"/>'
+        f'<circle cx="42" cy="{title_h / 2}" r="6" fill="#febc2e"/>'
+        f'<circle cx="62" cy="{title_h / 2}" r="6" fill="#28c840"/>'
+    )
+    title_text = config.get("title", "8enji — -zsh — 96×32")
+    parts.append(_text(
+        CANVAS_W / 2, title_h / 2 + 5, TEXT_DIM, 14,
+        _e(title_text), anchor="middle",
+    ))
 
-def _render_kv_block(
-    rows: list[tuple[str, str]],
-    key_x: int,
-    val_x: int,
-    start_y: int,
-    fs: int,
-    line_h: int,
-    colors: dict,
-) -> str:
-    """Render a key/value grid with purple keys and light values. The ' · '
-    middle-dot separator inside values is emitted as a dim tspan to match
-    the <span class="dim">·</span> wrapping in the design."""
-    out = []
-    for i, (k, v) in enumerate(rows):
-        row_y = start_y + fs + i * line_h
-        out.append(
-            f'<text x="{key_x}" y="{row_y}" font-family=\'{FONT_STACK}\' '
-            f'font-size="{fs}" fill="{colors["purple"]}">{_escape_xml(k)}</text>'
+    # ── ascii portrait ──
+    tspans = "".join(
+        f'<tspan x="{tw.pad_x}" dy="{0 if i == 0 else tw.ascii_size}" '
+        f'xml:space="preserve">{_e(line)}</tspan>'
+        for i, line in enumerate(ascii_lines)
+    )
+    parts.append(
+        f'<text fill="{tw.ascii_color}"{_font(tw.ascii_size)} '
+        f'x="{tw.pad_x}" y="{ascii_top + tw.ascii_size:.1f}" '
+        f'font-weight="500" xml:space="preserve">{tspans}</text>'
+    )
+
+    # ── prompt ──
+    handle = config.get("me", {}).get("handle", "8enji")
+    host   = config.get("me", {}).get("host_short", "dashboard")
+    parts.append(
+        f'<text x="{info_x}" y="{y_at(m["prompt_baseline"]):.1f}"'
+        f'{_font(m["prompt_fs"])}>'
+        f'<tspan fill="{TEXT}" font-weight="500">{_e(handle)}</tspan>'
+        f'<tspan fill="{TEXT_DIM}">@</tspan>'
+        f'<tspan fill="{TEXT}" font-weight="500">{_e(host)}</tspan>'
+        '</text>'
+    )
+
+    # ── optional rule under prompt ──
+    if tw.show_rule and m["rule_y"] is not None:
+        rule_w = 240
+        parts.append(
+            f'<line x1="{info_x}" y1="{y_at(m["rule_y"]):.1f}" '
+            f'x2="{info_x + rule_w}" y2="{y_at(m["rule_y"]):.1f}" '
+            f'stroke="{MUTED_SOFT}" stroke-width="1"/>'
         )
-        out.append(
-            f'<text x="{val_x}" y="{row_y}" font-family=\'{FONT_STACK}\' '
-            f'font-size="{fs}" fill="{colors["text"]}">'
-            f'{_render_value_with_dim_dots(v, colors)}</text>'
+
+    # ── kv1 ──
+    kv_key_w = 96
+    for i, (k, v) in enumerate(kv1):
+        y = y_at(m["kv1_top"] + i * m["kv_row_h"] + tw.font_size)
+        parts.append(_text(info_x, y, PURPLE, tw.font_size, _e(k)))
+        parts.append(_text(info_x + kv_key_w, y, TEXT, tw.font_size, _colorize_value(v)))
+
+    # ── stats ──
+    if tw.show_stats and stats:
+        parts.append(_text(
+            info_x, y_at(m["stats_title_y"]),
+            MUTED, m["section_fs"], _e("STATS"), weight="600",
+        ))
+        stat_col_w   = 280
+        stat_col_gap = 32
+        for i, (k, v) in enumerate(stats):
+            col = i % 2
+            row = i // 2
+            x = info_x + col * (stat_col_w + stat_col_gap)
+            y = y_at(m["stats_top"] + row * m["stat_row_h"] + tw.font_size)
+            parts.append(_text(x, y, TEXT_DIM, tw.font_size, _e(k)))
+            v_marked = _e(v).replace("★", f'<tspan fill="{ORANGE}">★</tspan>')
+            parts.append(_text(x + stat_col_w, y, TEXT, tw.font_size, v_marked, anchor="end"))
+            parts.append(
+                f'<line x1="{x}" y1="{y + 4:.1f}" '
+                f'x2="{x + stat_col_w}" y2="{y + 4:.1f}" '
+                f'stroke="{MUTED_SOFT}" stroke-opacity="0.35" '
+                f'stroke-width="1" stroke-dasharray="1 3"/>'
+            )
+
+    # ── languages ──
+    if tw.show_languages and langs:
+        parts.append(_text(
+            info_x, y_at(m["langs_title_y"]),
+            MUTED, m["section_fs"], _e("LANGUAGES · LAST 12MO"), weight="600",
+        ))
+        cursor = info_x
+        for (name, pct, color) in langs:
+            dot_size = 10
+            dot_y = y_at(m["langs_row_y"]) - m["lang_fs"] * 0.55
+            parts.append(
+                f'<rect x="{cursor}" y="{dot_y:.1f}" '
+                f'width="{dot_size}" height="{dot_size}" rx="2" fill="{color}"/>'
+            )
+            cursor += dot_size + 8
+            label = f'{_e(name)} <tspan fill="{TEXT_DIM}">{_e(pct)}</tspan>'
+            parts.append(_text(cursor, y_at(m["langs_row_y"]),
+                               TEXT, m["lang_fs"], label))
+            cursor += len(name + " " + pct) * m["lang_fs"] * 0.6 + 22
+
+    # ── now ──
+    if tw.show_now and nowkv:
+        parts.append(_text(
+            info_x, y_at(m["now_title_y"]),
+            MUTED, m["section_fs"], _e("NOW"), weight="600",
+        ))
+        for i, (k, v) in enumerate(nowkv):
+            y = y_at(m["now_top"] + i * m["kv_row_h"] + tw.font_size)
+            parts.append(_text(info_x, y, PURPLE, tw.font_size, _e(k)))
+            parts.append(_text(info_x + kv_key_w, y, TEXT, tw.font_size, _colorize_value(v)))
+
+    # ── palette swatches (optional) ──
+    if tw.show_palette:
+        palette_y = canvas_h - tw.pad_y - 14
+        sw_w, sw_h = 28, 14
+        swatches = ["#1a1f29", PINK, tw.accent, ORANGE,
+                    "#5fb7ff", PURPLE, "#5fd9c8", TEXT]
+        for i, c in enumerate(swatches):
+            parts.append(
+                f'<rect x="{info_x + i * sw_w}" y="{palette_y}" '
+                f'width="{sw_w}" height="{sw_h}" fill="{c}"/>'
+            )
+
+    # ── status bar (optional) ──
+    if tw.show_statusbar:
+        sb_h = 32
+        sb_y = canvas_h - sb_h
+        parts.append(
+            f'<line x1="0" y1="{sb_y}" x2="{CANVAS_W}" y2="{sb_y}" stroke="{TITLE_LINE}"/>'
+            f'<circle cx="22" cy="{sb_y + sb_h / 2}" r="3" fill="{tw.accent}"/>'
         )
-    return "".join(out)
+        parts.append(_text(
+            34, sb_y + sb_h / 2 + 4, MUTED_SOFT, 11,
+            _e("ONLINE  ·  V2.6.0"), weight="600",
+        ))
+        parts.append(_text(
+            CANVAS_W - 22, sb_y + sb_h / 2 + 4, MUTED_SOFT, 11,
+            _e(config.get("me", {}).get("github_url", "GITHUB.COM/8ENJI")),
+            weight="600", anchor="end",
+        ))
 
-
-def _render_value_with_dim_dots(value: str, colors: dict) -> str:
-    """Split a value on ' · ' and wrap each separator in a dim tspan."""
-    parts = value.split(" · ")
-    if len(parts) == 1:
-        return _escape_xml(value)
-    out = [_escape_xml(parts[0])]
-    for chunk in parts[1:]:
-        out.append(f' <tspan fill="{colors["muted"]}">·</tspan> ')
-        out.append(_escape_xml(chunk))
-    return "".join(out)
-
-
-def _render_chrome(title: str, canvas_h: int) -> str:
-    """Window border + titlebar (traffic lights + centered title)."""
-    cy = TITLEBAR_H // 2
-    return (
-        f'<g class="chrome">'
-        f'<rect x="0" y="0" width="{CANVAS_W}" height="{canvas_h}" '
-        f'rx="14" ry="14" fill="{COLORS["bg"]}" '
-        f'stroke="rgba(255,255,255,0.06)" stroke-width="1"/>'
-        f'<line x1="0" y1="{TITLEBAR_H}" x2="{CANVAS_W}" y2="{TITLEBAR_H}" '
-        f'stroke="rgba(255,255,255,0.05)" stroke-width="1"/>'
-        f'<circle cx="24" cy="{cy}" r="6" fill="#ff5f57"/>'
-        f'<circle cx="44" cy="{cy}" r="6" fill="#febc2e"/>'
-        f'<circle cx="64" cy="{cy}" r="6" fill="#28c840"/>'
-        f'<text x="{CANVAS_W // 2}" y="{cy + 5}" '
-        f'text-anchor="middle" fill="{COLORS["text_dim"]}" '
-        f'font-size="13.5" font-family=\'{FONT_STACK}\'>{title}</text>'
-        f"</g>"
+    # subtle outer border
+    parts.append(
+        f'<rect x="0.5" y="0.5" width="{CANVAS_W - 1}" height="{canvas_h - 1}" '
+        f'rx="13.5" ry="13.5" fill="none" stroke="{BORDER}"/>'
     )
-
-
-def _render_statusbar(y: int, version: str, handle: str, colors: dict) -> str:
-    text_y = y + 22
-    return (
-        f'<g class="statusbar">'
-        f'<line x1="0" y1="{y}" x2="{CANVAS_W}" y2="{y}" '
-        f'stroke="rgba(255,255,255,0.05)" stroke-width="1"/>'
-        f'<circle cx="26" cy="{text_y - 4}" r="3" fill="{colors["green"]}"/>'
-        f'<text x="40" y="{text_y}" fill="{colors["muted_soft"]}" '
-        f'font-size="11.5" font-family=\'{FONT_STACK}\' letter-spacing="1.4">ONLINE</text>'
-        f'<text x="120" y="{text_y}" fill="{colors["muted_soft"]}" '
-        f'font-size="11.5" font-family=\'{FONT_STACK}\' letter-spacing="1.4">'
-        f'{_escape_xml(version)}</text>'
-        f'<text x="{CANVAS_W - 22}" y="{text_y}" text-anchor="end" '
-        f'fill="{colors["muted_soft"]}" font-size="11.5" '
-        f"font-family='{FONT_STACK}' letter-spacing=\"1.4\">"
-        f'github.com/{_escape_xml(handle)}</text>'
-        f"</g>"
-    )
+    parts.append("</g></svg>")
+    return "".join(parts)
