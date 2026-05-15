@@ -129,8 +129,14 @@ class GitHubClient:
         activity = extract_activity(contrib["days"], today=today, window=60)
         activity_avg = sum(activity) / len(activity) if activity else 0.0
         activity_peak = max(activity) if activity else 0
+        # Streak = consecutive active days ending today (or yesterday, if no
+        # contributions have landed today yet — common when CI runs in UTC
+        # while the user is still on the previous calendar day locally).
         streak = 0
-        for v in reversed(activity):
+        days_reversed = list(reversed(activity))
+        if days_reversed and days_reversed[0] == 0:
+            days_reversed = days_reversed[1:]
+        for v in days_reversed:
             if v > 0:
                 streak += 1
             else:
