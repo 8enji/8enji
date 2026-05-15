@@ -367,7 +367,7 @@ def render(config: Mapping[str, Any], data: Mapping[str, Any]) -> str:
     if tw.show_languages and langs:
         parts.append(_text(
             info_x, y_at(m["langs_title_y"]),
-            MUTED, m["section_fs"], _e("LANGUAGES · LAST 12MO"), weight="600",
+            MUTED, m["section_fs"], _e("LANGUAGES"), weight="600",
         ))
         cursor = info_x
         for (name, pct, color) in langs:

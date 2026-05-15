@@ -25,7 +25,7 @@ GitHub API ──┘
   - prompt: `{me.handle}@{me.host_short}` with a dim `@`
   - KV grid (purple keys): `os`, `host`, `shell`, `editor`, `theme`, `uptime` (uptime is supplied in `data`)
   - `STATS` (toggleable) — 2-column row-major grid: repos / stars · followers / commits · streak / loc, with dotted underlines
-  - `LANGUAGES · LAST 12MO` (toggleable) — top 3 languages by share + an aggregated `other`, each with a colored square dot
+  - `LANGUAGES` (toggleable) — top 3 languages by share + an aggregated `other`, each with a colored square dot
   - `NOW` (toggleable) — building / learning / listening / reach
   - `PALETTE` (optional, off by default) — 8 swatches
   - status bar (optional, off by default) — `ONLINE · V2.6.0` plus `me.github_url`
