@@ -27,13 +27,22 @@ class GitHubClient:
         return r.json()
 
     def fetch_repos(self) -> list[dict]:
-        """All non-fork repos owned by the user."""
+        """All non-fork repos owned by the authenticated user, including
+        private ones. Uses /user/repos (auth-scoped) so the LOC and repo
+        counts include private repos; this assumes the token belongs to
+        `self.user`, which is the case for the dashboard's CI workflow."""
         repos: list[dict] = []
         page = 1
         while True:
             r = self.session.get(
-                f"{GITHUB_API}/users/{self.user}/repos",
-                params={"per_page": 100, "page": page, "sort": "updated", "type": "owner"},
+                f"{GITHUB_API}/user/repos",
+                params={
+                    "per_page": 100,
+                    "page": page,
+                    "sort": "updated",
+                    "affiliation": "owner",
+                    "visibility": "all",
+                },
                 timeout=15,
             )
             r.raise_for_status()
@@ -53,16 +62,47 @@ class GitHubClient:
         r.raise_for_status()
         return r.json()
 
-    def fetch_total_commits(self) -> int:
-        """All-time public commit count for the user, via the search API."""
-        r = self.session.get(
-            f"{GITHUB_API}/search/commits",
-            params={"q": f"author:{self.user}", "per_page": 1},
-            headers={"Accept": "application/vnd.github.cloak-preview+json"},
-            timeout=15,
-        )
-        r.raise_for_status()
-        return r.json()["total_count"]
+    def fetch_total_commits(self, created_at: str, today: date) -> int:
+        """All-time commits (public + private) since `created_at`.
+
+        contributionsCollection only accepts a 1-year window, so we chunk the
+        full lifetime into 365-day date slices (inclusive, non-overlapping)
+        and sum totalCommitContributions + restrictedContributionsCount for
+        each. The private count is included only if the requesting token can
+        see those contributions, which the dashboard's classic PAT can."""
+        start_date = date.fromisoformat(created_at[:10])
+        total = 0
+        window_start = start_date
+        while window_start <= today:
+            window_end = min(window_start + timedelta(days=365), today)
+            r = self.session.post(
+                GITHUB_GRAPHQL,
+                json={
+                    "query": (
+                        "query($login: String!, $from: DateTime!, $to: DateTime!) {"
+                        "  user(login: $login) {"
+                        "    contributionsCollection(from: $from, to: $to) {"
+                        "      totalCommitContributions"
+                        "      restrictedContributionsCount"
+                        "    }"
+                        "  }"
+                        "}"
+                    ),
+                    "variables": {
+                        "login": self.user,
+                        "from": f"{window_start}T00:00:00Z",
+                        "to": f"{window_end}T23:59:59Z",
+                    },
+                },
+                timeout=20,
+            )
+            r.raise_for_status()
+            cc = r.json()["data"]["user"]["contributionsCollection"]
+            total += cc["totalCommitContributions"] + cc["restrictedContributionsCount"]
+            if window_end >= today:
+                break
+            window_start = window_end + timedelta(days=1)
+        return total
 
     def fetch_contributions(self, today: date) -> dict:
         from datetime import datetime, time, timedelta, timezone
@@ -125,7 +165,9 @@ class GitHubClient:
         )
 
         contrib = self.fetch_contributions(today=today)
-        total_commits = self.fetch_total_commits()
+        total_commits = self.fetch_total_commits(
+            created_at=user["created_at"], today=today
+        )
         activity = extract_activity(contrib["days"], today=today, window=60)
         activity_avg = sum(activity) / len(activity) if activity else 0.0
         activity_peak = max(activity) if activity else 0
@@ -154,7 +196,9 @@ class GitHubClient:
 
         return {
             "followers": user["followers"],
-            "public_repos": user["public_repos"],
+            # `public_repos` retains its historical name but now reflects
+            # all owned non-fork repos visible to the token (public + private).
+            "public_repos": len(repos),
             "total_stars": sum(r.get("stargazers_count", 0) for r in repos),
             "total_commits": total_commits,
             "total_loc_bytes": total_loc_bytes,

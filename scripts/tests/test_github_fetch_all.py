@@ -9,18 +9,23 @@ from scripts.github_data import GitHubClient
 def test_fetch_all_composes_dashboard_data():
     responses.get(
         "https://api.github.com/users/8enji",
-        json={"login": "8enji", "followers": 89, "public_repos": 42},
+        json={
+            "login": "8enji",
+            "followers": 89,
+            "public_repos": 42,
+            "created_at": "2025-05-14T00:00:00Z",
+        },
         status=200,
     )
     responses.get(
-        "https://api.github.com/users/8enji/repos",
+        "https://api.github.com/user/repos",
         json=[
             {"name": "static-rs", "owner": {"login": "8enji"}, "fork": False,
-             "stargazers_count": 84, "language": "Rust"},
+             "stargazers_count": 84, "language": "Rust", "private": False},
             {"name": "tinybuf", "owner": {"login": "8enji"}, "fork": False,
-             "stargazers_count": 51, "language": "Go"},
+             "stargazers_count": 51, "language": "Go", "private": False},
             {"name": "dotfiles", "owner": {"login": "8enji"}, "fork": False,
-             "stargazers_count": 37, "language": "Lua"},
+             "stargazers_count": 37, "language": "Lua", "private": True},
         ],
         status=200,
     )
@@ -39,6 +44,10 @@ def test_fetch_all_composes_dashboard_data():
         json={"Lua": 20000},
         status=200,
     )
+    # The contributions calendar (per-day) and the all-time commits sum both
+    # hit the GraphQL endpoint. The responses library matches POSTs in order.
+    # Call order: fetch_contributions (calendar) then fetch_total_commits (1
+    # yearly window since created_at is ~1 year before today).
     responses.post(
         "https://api.github.com/graphql",
         json={"data": {"user": {"contributionsCollection": {
@@ -49,9 +58,12 @@ def test_fetch_all_composes_dashboard_data():
         }}}},
         status=200,
     )
-    responses.get(
-        "https://api.github.com/search/commits",
-        json={"total_count": 9870, "items": []},
+    responses.post(
+        "https://api.github.com/graphql",
+        json={"data": {"user": {"contributionsCollection": {
+            "totalCommitContributions": 3128,
+            "restrictedContributionsCount": 1000,
+        }}}},
         status=200,
     )
 
@@ -59,9 +71,12 @@ def test_fetch_all_composes_dashboard_data():
     data = client.fetch_all(today=date(2026, 5, 14))
 
     assert data["followers"] == 89
-    assert data["public_repos"] == 42
+    # public_repos field now reflects all owned non-fork repos (including private)
+    assert data["public_repos"] == 3
     assert data["total_stars"] == 84 + 51 + 37
-    assert data["total_commits"] == 9870
+    # total_commits = sum of (totalCommitContributions + restrictedContributionsCount)
+    # across yearly windows from created_at to today (= 3128 + 1000 here)
+    assert data["total_commits"] == 4128
     assert data["total_loc_bytes"] == 140000
     assert len(data["activity"]) == 60
     assert data["activity"][-1] == 12
