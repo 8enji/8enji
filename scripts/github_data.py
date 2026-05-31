@@ -9,9 +9,12 @@ GITHUB_GRAPHQL = "https://api.github.com/graphql"
 
 
 class GitHubClient:
-    def __init__(self, token: str, user: str):
+    def __init__(self, token: str, user: str, include_orgs: list[str] | None = None):
         self.token = token
         self.user = user
+        # Orgs whose repos are treated as the user's own (e.g. a solo org).
+        # Empty → owner-only, the historical behavior.
+        self.include_orgs = include_orgs or []
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -27,10 +30,16 @@ class GitHubClient:
         return r.json()
 
     def fetch_repos(self) -> list[dict]:
-        """All non-fork repos owned by the authenticated user, including
-        private ones. Uses /user/repos (auth-scoped) so the LOC and repo
-        counts include private repos; this assumes the token belongs to
-        `self.user`, which is the case for the dashboard's CI workflow."""
+        """Non-fork repos owned by the authenticated user, including private
+        ones. Uses /user/repos (auth-scoped) so the LOC and repo counts include
+        private repos; this assumes the token belongs to `self.user`, which is
+        the case for the dashboard's CI workflow.
+
+        When `self.include_orgs` is set, the affiliation is broadened to also
+        return repos from orgs the user belongs to, and the result is filtered
+        to the user plus those whitelisted orgs (repos from other orgs the
+        user happens to be a member of are dropped)."""
+        affiliation = "owner,organization_member" if self.include_orgs else "owner"
         repos: list[dict] = []
         page = 1
         while True:
@@ -40,7 +49,7 @@ class GitHubClient:
                     "per_page": 100,
                     "page": page,
                     "sort": "updated",
-                    "affiliation": "owner",
+                    "affiliation": affiliation,
                     "visibility": "all",
                 },
                 timeout=15,
@@ -53,7 +62,14 @@ class GitHubClient:
             if len(chunk) < 100:
                 break
             page += 1
-        return [r for r in repos if not r.get("fork")]
+        repos = [r for r in repos if not r.get("fork")]
+        if self.include_orgs:
+            allowed = {self.user.lower(), *(o.lower() for o in self.include_orgs)}
+            repos = [
+                r for r in repos
+                if r.get("owner", {}).get("login", "").lower() in allowed
+            ]
+        return repos
 
     def fetch_repo_languages(self, owner: str, repo: str) -> dict[str, int]:
         r = self.session.get(

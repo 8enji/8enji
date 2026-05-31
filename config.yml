@@ -10,6 +10,9 @@ me:
   theme: tokyonight-storm
   uptime_from: '2004-04-06'
   github_url: github.com/8enji
+  # Orgs whose repos count as your own across all stats (sole-contributor orgs).
+  include_orgs:
+    - getveil
 
 now:
   building: runparallax.dev

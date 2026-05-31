@@ -59,7 +59,11 @@ def main() -> int:
         if not token:
             print("error: GITHUB_TOKEN env var required", file=sys.stderr)
             return 2
-        client = GitHubClient(token=token, user=config["me"]["handle"])
+        client = GitHubClient(
+            token=token,
+            user=config["me"]["handle"],
+            include_orgs=config["me"].get("include_orgs", []),
+        )
         gd = client.fetch_all(today=today)
         uptime = _format_uptime(config["me"]["uptime_from"], today)
         data = _adapt_github_data(gd, uptime)

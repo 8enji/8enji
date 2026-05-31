@@ -49,6 +49,55 @@ def test_fetch_repos_sends_auth_header():
 
 
 @responses.activate
+def test_fetch_repos_default_keeps_affiliation_owner_only():
+    """With no whitelist, the affiliation stays owner-only (current behavior)."""
+    responses.get(
+        "https://api.github.com/user/repos",
+        json=[],
+        status=200,
+    )
+    client = GitHubClient(token="t", user="8enji")
+    client.fetch_repos()
+    url = responses.calls[0].request.url
+    assert "affiliation=owner" in url
+    assert "organization_member" not in url
+
+
+@responses.activate
+def test_fetch_repos_includes_whitelisted_org_and_excludes_others():
+    """A whitelisted org's repos are kept; the affiliation is broadened to pull
+    them in, and repos from non-whitelisted orgs are filtered out."""
+    responses.get(
+        "https://api.github.com/user/repos",
+        json=[
+            {"name": "static-rs", "owner": {"login": "8enji"}, "fork": False},
+            {"name": "veil", "owner": {"login": "getveil"}, "fork": False},
+            {"name": "elsewhere", "owner": {"login": "someorg"}, "fork": False},
+        ],
+        status=200,
+    )
+    client = GitHubClient(token="t", user="8enji", include_orgs=["getveil"])
+    repos = client.fetch_repos()
+    assert sorted(r["name"] for r in repos) == ["static-rs", "veil"]
+    # Affiliation broadened so org-member repos are returned by the API.
+    assert "organization_member" in responses.calls[0].request.url
+
+
+@responses.activate
+def test_fetch_repos_org_whitelist_is_case_insensitive():
+    responses.get(
+        "https://api.github.com/user/repos",
+        json=[
+            {"name": "veil", "owner": {"login": "getveil"}, "fork": False},
+        ],
+        status=200,
+    )
+    client = GitHubClient(token="t", user="8enji", include_orgs=["GetVeil"])
+    repos = client.fetch_repos()
+    assert [r["name"] for r in repos] == ["veil"]
+
+
+@responses.activate
 def test_fetch_total_commits_sums_public_and_private_across_years():
     # Account created roughly 2 years before "today", so the lifetime spans
     # two yearly windows. Each window returns its own public + private split.
